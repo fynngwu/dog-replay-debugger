@@ -1,0 +1,58 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# C++ build artifacts
+backend/build/
+backend/daemon/CMakeCache.txt
+backend/daemon/CMakeFiles/
+backend/daemon/cmake_install.cmake
+backend/daemon/Makefile
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+MUJOCO_LOG.TXT
+
+# Temporary files
+*.tmp
+*.bak
+.tmp/
+*.zip
+
+# Sim record outputs
+sim_record/output/
+sim_record/meshes/
+sim_record/policy.onnx
