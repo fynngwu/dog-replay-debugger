@@ -53,5 +53,5 @@ MUJOCO_LOG.TXT
 *.zip
 
 # Sim record outputs
-sim_record/output/*.png
+sim_record/output/
 sim_record/policy.onnx
