@@ -16,10 +16,11 @@ def fmt_array(values: np.ndarray | None, precision: int = 3) -> str:
 
 def print_status(snapshot: RuntimeSnapshot) -> None:
     print(f'CSV: {snapshot.csv_path}')
-    print(f'Frames: {snapshot.cursor}/{max(0, snapshot.total_frames - 1)}  loaded={snapshot.sequence_loaded}  playing={snapshot.playing}')
+    print(f'Frames: {snapshot.cursor}/{max(0, snapshot.total_frames - 1)}  loaded={snapshot.sequence_loaded}  playing={snapshot.playing}  speed={snapshot.playback_speed:.2f}x')
     print(f'Robot: connected={snapshot.robot_connected} tx={snapshot.robot_tx_hz:.1f}Hz rx={snapshot.robot_rx_hz:.1f}Hz age={snapshot.robot_state_age_s}')
     print(f'MuJoCo: loaded={snapshot.mujoco_loaded} viewer={snapshot.mujoco_viewer_running} apply={snapshot.mujoco_apply_hz:.1f}Hz age={snapshot.mujoco_state_age_s}')
-    print(f'Target: {fmt_array(snapshot.current_target)}')
+    print(f'Target raw: {fmt_array(snapshot.current_target_raw)}')
+    print(f'Target clamped: {fmt_array(snapshot.current_target)}')
     if snapshot.mujoco_state is not None:
         print(f'MuJoCo pos: {fmt_array(snapshot.mujoco_state.positions)}')
         print(f'MuJoCo err: {fmt_array(snapshot.mujoco_error)}')

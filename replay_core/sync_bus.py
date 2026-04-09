@@ -17,6 +17,8 @@ class SharedStateBus:
         self._sequence: Optional[ReplaySequence] = None
         self._cursor = 0
         self._playing = False
+        self._playback_speed = 1.0
+        self._target_raw = np.zeros(NUM_JOINTS, dtype=np.float64)
         self._target = np.zeros(NUM_JOINTS, dtype=np.float64)
         self._display_command_seq = 0
         self._robot_command_seq = 0
@@ -40,6 +42,8 @@ class SharedStateBus:
             self._sequence = sequence
             self._cursor = 0
             self._playing = False
+            self._playback_speed = 1.0
+            self._target_raw = sequence.frames[0].target_rel.copy()
             self._target = sequence.frames[0].target_rel.copy()
             self._display_command_seq += 1
 
@@ -48,13 +52,23 @@ class SharedStateBus:
             self._sequence = None
             self._cursor = 0
             self._playing = False
+            self._playback_speed = 1.0
+            self._target_raw = np.zeros(NUM_JOINTS, dtype=np.float64)
             self._target = np.zeros(NUM_JOINTS, dtype=np.float64)
             self._display_command_seq += 1
 
-    def set_cursor_target(self, cursor: int, target: np.ndarray, playing: bool, publish_to_robot: bool) -> None:
+    def set_cursor_target(
+        self,
+        cursor: int,
+        raw_target: np.ndarray,
+        limited_target: np.ndarray,
+        playing: bool,
+        publish_to_robot: bool,
+    ) -> None:
         with self._lock:
             self._cursor = int(cursor)
-            self._target = np.array(target, dtype=np.float64)
+            self._target_raw = np.array(raw_target, dtype=np.float64)
+            self._target = np.array(limited_target, dtype=np.float64)
             self._playing = bool(playing)
             self._display_command_seq += 1
             if publish_to_robot:
@@ -64,9 +78,17 @@ class SharedStateBus:
         with self._lock:
             self._playing = bool(playing)
 
+    def set_playback_speed(self, speed: float) -> None:
+        with self._lock:
+            self._playback_speed = float(speed)
+
     def get_target(self) -> np.ndarray:
         with self._lock:
             return self._target.copy()
+
+    def get_raw_target(self) -> np.ndarray:
+        with self._lock:
+            return self._target_raw.copy()
 
     def get_robot_command_seq(self) -> int:
         with self._lock:
@@ -135,6 +157,8 @@ class SharedStateBus:
                 total_frames=total_frames,
                 cursor=self._cursor,
                 playing=self._playing,
+                playback_speed=self._playback_speed,
+                current_target_raw=self._target_raw.copy(),
                 current_target=self._target.copy(),
                 robot_connected=self._robot_connected,
                 robot_tx_hz=self._robot_tx_hz,

@@ -16,11 +16,12 @@ Commands:
   init [seconds]
   enable
   disable
-  start [frame]
+  start [frame] [speed]
   stop
   seek <frame>
   step
   prev
+  speed <factor>
   status
   table
   logs
@@ -73,8 +74,13 @@ def main() -> None:
                 elif cmd == 'disable':
                     print(engine.robot_disable())
                 elif cmd == 'start':
-                    frame = None if len(parts) < 2 else int(parts[1])
-                    print('OK' if engine.start(frame) else 'FAIL')
+                    frame = None
+                    speed = 1.0
+                    if len(parts) >= 2:
+                        frame = int(parts[1])
+                    if len(parts) >= 3:
+                        speed = float(parts[2])
+                    print('OK' if engine.start(frame, speed=speed) else 'FAIL')
                 elif cmd == 'stop':
                     engine.stop(); print('OK')
                 elif cmd == 'seek' and len(parts) >= 2:
@@ -83,6 +89,8 @@ def main() -> None:
                     print('OK' if engine.step() else 'FAIL')
                 elif cmd == 'prev':
                     print('OK' if engine.prev() else 'FAIL')
+                elif cmd == 'speed' and len(parts) >= 2:
+                    print(f'OK speed={engine.set_playback_speed(float(parts[1])):.2f}x')
                 elif cmd == 'status':
                     print_status(engine.get_snapshot())
                 elif cmd == 'table':

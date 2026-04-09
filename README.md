@@ -42,24 +42,16 @@ Supported time columns:
 2. `sim_time`
 3. fallback to row index × estimated frame dt
 
-## Install
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
 ## Run GUI
 
 ```bash
-python run_gui.py
+uv run python run_gui.py
 ```
 
 ## Run CLI
 
 ```bash
-python run_cli.py
+uv run python run_cli.py
 ```
 
 Inside the CLI, type `help`.

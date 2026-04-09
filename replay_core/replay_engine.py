@@ -4,11 +4,14 @@ import threading
 import time
 from typing import Optional
 
+import numpy as np
+
 from adapters.mujoco_adapter import MujocoAdapter
 from adapters.null_robot_adapter import NullRobotAdapter
 from adapters.robot_adapter import RobotAdapter
 from replay_core.config import EngineConfig
 from replay_core.csv_loader import CsvLoadError, load_replay_csv
+from replay_core.joint_limits import clamp_relative_targets
 from replay_core.sync_bus import SharedStateBus
 from replay_core.types import ReplaySequence, RuntimeSnapshot
 
@@ -34,15 +37,19 @@ class ReplayEngine:
         with self._lock:
             self.sequence = sequence
             self.bus.set_sequence(sequence)
+            first_raw = sequence.frames[0].target_rel
+            first_limited = self._limit_targets(first_raw)
+            self.bus.set_cursor_target(0, first_raw, first_limited, playing=False, publish_to_robot=False)
         self.bus.log(
-            f'CSV loaded: {sequence.csv_path} ({sequence.total_frames} frames, target={sequence.target_columns}, time={sequence.time_columns}, dt≈{sequence.estimated_dt:.4f}s)'
+            f'CSV loaded: {sequence.csv_path} ({sequence.total_frames} frames, target={sequence.target_columns}, '
+            f'time={sequence.time_columns}, dt≈{sequence.estimated_dt:.4f}s, target_display=daemon_clamped_relative)'
         )
         return True
 
     def load_mujoco(self, xml_path: str, start_viewer: bool = True) -> bool:
         ok = self.mujoco.load_model(xml_path, start_viewer=start_viewer)
         if ok and self.sequence is not None:
-            self.bus.log('MuJoCo ready and following the local replay cursor')
+            self.bus.log('MuJoCo ready and following the local replay cursor with daemon-equivalent joint limits')
         return ok
 
     def connect_robot(self, host: str, cmd_port: Optional[int] = None, state_port: Optional[int] = None) -> bool:
@@ -76,19 +83,25 @@ class ReplayEngine:
             return {'ok': False, 'msg': 'robot is not connected'}
         return self.robot.disable()
 
-    def start(self, from_idx: Optional[int] = None) -> bool:
+    def set_playback_speed(self, speed: float) -> float:
+        safe = max(0.01, float(speed))
+        self.bus.set_playback_speed(safe)
+        return safe
+
+    def start(self, from_idx: Optional[int] = None, speed: float = 1.0) -> bool:
+        self.stop()
         with self._lock:
             if self.sequence is None:
                 self.bus.log('Cannot start replay: no CSV loaded')
                 return False
+            self.bus.set_playback_speed(max(0.01, float(speed)))
             if from_idx is not None:
                 self._set_cursor_locked(int(from_idx), playing=False, publish_to_robot=True)
-            self.stop()
             self._play_stop.clear()
             self.bus.set_playing(True)
             self._play_thread = threading.Thread(target=self._play_loop, daemon=True)
             self._play_thread.start()
-        self.bus.log(f'Replay started from frame {self.bus.current_cursor()}')
+        self.bus.log(f'Replay started from frame {self.bus.current_cursor()} at {self.bus.snapshot().playback_speed:.2f}x')
         return True
 
     def stop(self) -> None:
@@ -100,31 +113,43 @@ class ReplayEngine:
         self.bus.set_playing(False)
 
     def seek(self, frame_idx: int) -> bool:
+        self.stop()
         with self._lock:
             if self.sequence is None:
                 self.bus.log('Cannot seek: no CSV loaded')
                 return False
-            self.stop()
             self._set_cursor_locked(frame_idx, playing=False, publish_to_robot=True)
         self.bus.log(f'Seek -> frame {self.bus.current_cursor()}')
         return True
 
     def step(self) -> bool:
+        self.stop()
         with self._lock:
             if self.sequence is None:
                 self.bus.log('Cannot step: no CSV loaded')
                 return False
-            self.stop()
             self._set_cursor_locked(self.bus.current_cursor() + 1, playing=False, publish_to_robot=True)
         return True
 
     def prev(self) -> bool:
+        self.stop()
         with self._lock:
             if self.sequence is None:
                 self.bus.log('Cannot prev: no CSV loaded')
                 return False
-            self.stop()
             self._set_cursor_locked(self.bus.current_cursor() - 1, playing=False, publish_to_robot=True)
+        return True
+
+    def set_manual_target(self, raw_target: np.ndarray) -> bool:
+        raw = np.asarray(raw_target, dtype=np.float64).reshape(-1)
+        if raw.shape[0] != 12:
+            self.bus.log(f'Cannot set manual target: expected 12 values, got {raw.shape[0]}')
+            return False
+        self.stop()
+        with self._lock:
+            cursor = 0 if self.sequence is None else self.bus.current_cursor()
+            limited = self._limit_targets(raw)
+            self.bus.set_cursor_target(cursor, raw, limited, playing=False, publish_to_robot=True)
         return True
 
     def get_snapshot(self) -> RuntimeSnapshot:
@@ -136,11 +161,15 @@ class ReplayEngine:
             self.robot.disconnect()
         self.mujoco.close()
 
+    def _limit_targets(self, raw_target: np.ndarray) -> np.ndarray:
+        return clamp_relative_targets(raw_target, action_scale=1.0)
+
     def _set_cursor_locked(self, frame_idx: int, playing: bool, publish_to_robot: bool) -> None:
         assert self.sequence is not None
         frame_idx = max(0, min(int(frame_idx), self.sequence.total_frames - 1))
         frame = self.sequence.frames[frame_idx]
-        self.bus.set_cursor_target(frame.index, frame.target_rel, playing=playing, publish_to_robot=publish_to_robot)
+        limited = self._limit_targets(frame.target_rel)
+        self.bus.set_cursor_target(frame.index, frame.target_rel, limited, playing=playing, publish_to_robot=publish_to_robot)
 
     def _play_loop(self) -> None:
         with self._lock:
@@ -149,18 +178,20 @@ class ReplayEngine:
                 return
             start_cursor = self.bus.current_cursor()
             start_time_sec = sequence.frames[start_cursor].time_sec
+            speed = max(0.01, self.bus.snapshot().playback_speed)
         start_wall = time.monotonic()
         idx = start_cursor
         while not self._play_stop.is_set() and sequence is not None and idx < sequence.total_frames:
             elapsed = time.monotonic() - start_wall
-            replay_time = start_time_sec + elapsed
+            replay_time = start_time_sec + elapsed * speed
             while idx + 1 < sequence.total_frames and sequence.frames[idx + 1].time_sec <= replay_time:
                 idx += 1
             with self._lock:
                 if self.sequence is None:
                     break
                 frame = self.sequence.frames[idx]
-                self.bus.set_cursor_target(frame.index, frame.target_rel, playing=True, publish_to_robot=True)
+                limited = self._limit_targets(frame.target_rel)
+                self.bus.set_cursor_target(frame.index, frame.target_rel, limited, playing=True, publish_to_robot=True)
             if idx >= sequence.total_frames - 1:
                 break
             time.sleep(self.config.play_loop_sleep_s)
@@ -168,7 +199,8 @@ class ReplayEngine:
             if self.sequence is not None:
                 final_idx = min(idx, self.sequence.total_frames - 1)
                 frame = self.sequence.frames[final_idx]
-                self.bus.set_cursor_target(frame.index, frame.target_rel, playing=False, publish_to_robot=True)
+                limited = self._limit_targets(frame.target_rel)
+                self.bus.set_cursor_target(frame.index, frame.target_rel, limited, playing=False, publish_to_robot=True)
         self.bus.set_playing(False)
         if sequence is not None:
             self.bus.log(f'Replay stopped at frame {min(idx, sequence.total_frames - 1)}')

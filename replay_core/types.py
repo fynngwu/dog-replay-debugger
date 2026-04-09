@@ -41,6 +41,8 @@ class RuntimeSnapshot:
     total_frames: int
     cursor: int
     playing: bool
+    playback_speed: float
+    current_target_raw: np.ndarray
     current_target: np.ndarray
     robot_connected: bool
     robot_tx_hz: float

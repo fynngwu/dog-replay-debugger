@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -35,21 +36,23 @@ class ControlPanel(QWidget):
         self.xml_path = QLineEdit()
         self.csv_browse = QPushButton('Open CSV')
         self.xml_browse = QPushButton('Open MuJoCo XML')
+        self.csv_load = QPushButton('Load')
+        self.xml_load = QPushButton('Load')
 
         row1 = QHBoxLayout()
         row1.setSpacing(8)
         row1.addWidget(self.csv_path)
         row1.addWidget(self.csv_browse)
+        row1.addWidget(self.csv_load)
 
         row2 = QHBoxLayout()
         row2.setSpacing(8)
         row2.addWidget(self.xml_path)
         row2.addWidget(self.xml_browse)
+        row2.addWidget(self.xml_load)
 
-        csv_wrap = QWidget()
-        csv_wrap.setLayout(row1)
-        xml_wrap = QWidget()
-        xml_wrap.setLayout(row2)
+        csv_wrap = QWidget(); csv_wrap.setLayout(row1)
+        xml_wrap = QWidget(); xml_wrap.setLayout(row2)
 
         file_layout.addRow('CSV', csv_wrap)
         file_layout.addRow('MuJoCo XML', xml_wrap)
@@ -106,6 +109,11 @@ class ControlPanel(QWidget):
         self.frame_slider = QSlider(Qt.Orientation.Horizontal)
         self.frame_slider.setRange(0, 0)
 
+        self.speed_combo = QComboBox()
+        self.speed_combo.setEditable(True)
+        self.speed_combo.addItems(['0.25', '0.5', '1.0', '2.0', '4.0'])
+        self.speed_combo.setCurrentText('1.0')
+
         replay_layout.addWidget(self.start_btn, 0, 0)
         replay_layout.addWidget(self.stop_btn, 0, 1)
         replay_layout.addWidget(self.prev_btn, 0, 2)
@@ -114,7 +122,9 @@ class ControlPanel(QWidget):
         replay_layout.addWidget(QLabel('Frame'), 1, 0)
         replay_layout.addWidget(self.frame_spin, 1, 1)
         replay_layout.addWidget(self.frame_slider, 1, 2, 1, 2)
-
+        replay_layout.addWidget(QLabel('Speed'), 2, 0)
+        replay_layout.addWidget(self.speed_combo, 2, 1)
+        replay_layout.addWidget(QLabel('x at start'), 2, 2, 1, 2)
         root.addWidget(replay_box)
 
         # Recording section
@@ -125,7 +135,6 @@ class ControlPanel(QWidget):
 
         self.record_btn = QPushButton('Record')
         self.record_btn.setObjectName('record_btn')
-        self.record_btn.setCheckable(True)
         self.stop_record_btn = QPushButton('Stop Record')
         self.stop_record_btn.setObjectName('stop_record_btn')
         self.stop_record_btn.setEnabled(False)
