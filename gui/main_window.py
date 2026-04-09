@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import csv
 import sys
+import time
+from pathlib import Path
+from typing import List
 
 from PySide6.QtCore import QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
@@ -20,6 +24,7 @@ from gui.curves_panel import CurvesPanel
 from gui.joint_dashboard import JointDashboard
 from gui.status_panel import StatusPanel
 from gui.styles import MODERN_STYLE
+from replay_core.constants import JOINT_NAMES
 from replay_core.replay_engine import ReplayEngine
 
 
@@ -32,6 +37,11 @@ class MainWindow(QMainWindow):
 
         self.engine = ReplayEngine()
         self._last_log_count = 0
+
+        # Recording state
+        self._recording = False
+        self._record_start_time: float = 0.0
+        self._record_data: List[dict] = []
 
         # Create UI components
         self.controls = ControlPanel()
@@ -143,6 +153,8 @@ class MainWindow(QMainWindow):
         c.step_btn.clicked.connect(self.engine.step)
         c.frame_spin.valueChanged.connect(self._seek_from_spin)
         c.frame_slider.valueChanged.connect(self._seek_from_slider)
+        c.record_btn.clicked.connect(self._start_recording)
+        c.stop_record_btn.clicked.connect(self._stop_recording)
 
     def _load_default_files(self) -> None:
         """Load default XML and CSV files and display paths."""
@@ -189,15 +201,74 @@ class MainWindow(QMainWindow):
 
     def _on_joint_selected(self, joint_name: str) -> None:
         """Handle joint card selection to update curves."""
-        from replay_core.constants import JOINT_NAMES
         if joint_name in JOINT_NAMES:
             idx = JOINT_NAMES.index(joint_name)
             if hasattr(self.curves, 'joint_combo') and self.curves.joint_combo:
                 self.curves.joint_combo.setCurrentIndex(idx)
 
+    def _start_recording(self) -> None:
+        """Start recording joint data."""
+        self._recording = True
+        self._record_start_time = time.monotonic()
+        self._record_data.clear()
+        self.controls.record_btn.setEnabled(False)
+        self.controls.stop_record_btn.setEnabled(True)
+        self.controls.record_btn.setText('Recording...')
+
+    def _stop_recording(self) -> None:
+        """Stop recording and save data to CSV."""
+        self._recording = False
+        self.controls.record_btn.setEnabled(True)
+        self.controls.stop_record_btn.setEnabled(False)
+        self.controls.record_btn.setText('Record')
+
+        if not self._record_data:
+            return
+
+        # Save to project directory
+        save_dir = Path(__file__).resolve().parent.parent
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        filename = save_dir / f'recording_{timestamp}.csv'
+        num_samples = len(self._record_data)
+
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            header = ['time_s']
+            for name in JOINT_NAMES:
+                header.append(f'target_{name}')
+            for name in JOINT_NAMES:
+                header.append(f'robot_{name}')
+            writer.writerow(header)
+            for row in self._record_data:
+                writer.writerow(row)
+
+        self._record_data.clear()
+        QMessageBox.information(
+            self,
+            'Recording saved',
+            f'Saved {num_samples} samples to:\n{filename}'
+        )
+
+    def _capture_snapshot(self, snapshot) -> None:
+        """Capture current snapshot for recording."""
+        if not self._recording:
+            return
+        t = time.monotonic() - self._record_start_time
+        target = snapshot.current_target.tolist()
+        robot = (
+            snapshot.robot_state.positions.tolist()
+            if snapshot.robot_state is not None
+            else [0.0] * 12
+        )
+        self._record_data.append([t] + target + robot)
+
     def refresh(self) -> None:
         """Refresh UI with current snapshot data."""
         snapshot = self.engine.get_snapshot()
+
+        # Record data if recording
+        self._capture_snapshot(snapshot)
+
         max_idx = max(0, snapshot.total_frames - 1)
 
         # Update controls

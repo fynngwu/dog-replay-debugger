@@ -61,7 +61,7 @@ class ControlPanel(QWidget):
         robot_layout.setContentsMargins(12, 12, 12, 12)
         robot_layout.setSpacing(8)
 
-        self.host = QLineEdit('127.0.0.1')
+        self.host = QLineEdit('10.20.127.185')
         self.cmd_port = QLineEdit('47001')
         self.state_port = QLineEdit('47002')
         self.connect_btn = QPushButton('Connect')
@@ -116,4 +116,22 @@ class ControlPanel(QWidget):
         replay_layout.addWidget(self.frame_slider, 1, 2, 1, 2)
 
         root.addWidget(replay_box)
+
+        # Recording section
+        record_box = QGroupBox('Recording')
+        record_layout = QHBoxLayout(record_box)
+        record_layout.setContentsMargins(12, 12, 12, 12)
+        record_layout.setSpacing(8)
+
+        self.record_btn = QPushButton('Record')
+        self.record_btn.setObjectName('record_btn')
+        self.record_btn.setCheckable(True)
+        self.stop_record_btn = QPushButton('Stop Record')
+        self.stop_record_btn.setObjectName('stop_record_btn')
+        self.stop_record_btn.setEnabled(False)
+
+        record_layout.addWidget(self.record_btn)
+        record_layout.addWidget(self.stop_record_btn)
+        root.addWidget(record_box)
+
         root.addStretch(1)

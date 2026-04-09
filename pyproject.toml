@@ -12,4 +12,5 @@ dependencies = [
     "pyside6>=6.5",
     "onnxruntime<1.20",
     "pyyaml>=6.0.3",
+    "pandas>=2.3.3",
 ]
