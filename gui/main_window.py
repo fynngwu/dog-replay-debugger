@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.engine = ReplayEngine()
         self._last_log_count = 0
         self._recording = False
+        self._slider_pressed = False
         self._record_start_time: float = 0.0
         self._record_data: List[list[float]] = []
 
@@ -136,13 +137,17 @@ class MainWindow(QMainWindow):
         c.prev_btn.clicked.connect(self.engine.prev)
         c.step_btn.clicked.connect(self.engine.step)
         c.frame_spin.valueChanged.connect(self._seek_from_spin)
-        c.frame_slider.valueChanged.connect(self._seek_from_slider)
+        c.frame_slider.sliderPressed.connect(self._on_slider_pressed)
+        c.frame_slider.sliderReleased.connect(self._seek_from_slider_release)
         c.record_btn.clicked.connect(self._start_recording)
         c.stop_record_btn.clicked.connect(self._stop_recording)
 
         self.knee_debug.record_requested.connect(self._start_recording)
         self.knee_debug.stop_record_requested.connect(self._stop_recording)
         self.knee_debug.target_changed.connect(self._apply_knee_slider)
+
+        c.speed_combo.editTextChanged.connect(self._on_speed_changed)
+        c.speed_combo.currentTextChanged.connect(self._on_speed_changed)
 
     def _project_root(self) -> Path:
         return Path(__file__).resolve().parent.parent
@@ -207,6 +212,13 @@ class MainWindow(QMainWindow):
             self.controls.speed_combo.setCurrentText('1.0')
             return 1.0
 
+    def _on_speed_changed(self, text: str) -> None:
+        try:
+            speed = max(0.01, float(text.strip()))
+        except Exception:
+            return
+        self.engine.set_playback_speed(speed)
+
     def _start(self) -> None:
         self.engine.start(self.controls.frame_spin.value(), speed=self._parse_speed())
 
@@ -216,11 +228,16 @@ class MainWindow(QMainWindow):
             return
         self.engine.seek(value)
 
-    def _seek_from_slider(self, value: int) -> None:
+    def _seek_from_slider_release(self) -> None:
+        self._slider_pressed = False
+        value = self.controls.frame_slider.value()
         snapshot = self.engine.get_snapshot()
         if snapshot.total_frames == 0 or snapshot.cursor == value:
             return
         self.engine.seek(value)
+
+    def _on_slider_pressed(self) -> None:
+        self._slider_pressed = True
 
     def _on_joint_selected(self, joint_name: str) -> None:
         if joint_name in JOINT_NAMES:
@@ -234,8 +251,9 @@ class MainWindow(QMainWindow):
         for joint_idx in knee_indices:
             raw_target[joint_idx] = float(raw_value)
         self.engine.set_manual_target(raw_target)
-        preview_clamped = clamp_single_relative_target(knee_indices[0], raw_value) if knee_indices else raw_value
-        self.knee_debug.set_slider_feedback(raw_value, preview_clamped)
+        for joint_idx in knee_indices:
+            preview_clamped = clamp_single_relative_target(joint_idx, raw_value)
+            self.knee_debug.set_slider_feedback(joint_idx, raw_value, preview_clamped)
 
     def _set_recording_state(self, recording: bool) -> None:
         self._recording = recording
@@ -295,7 +313,8 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(self.controls.frame_spin):
             self.controls.frame_spin.setValue(snapshot.cursor)
         with QSignalBlocker(self.controls.frame_slider):
-            self.controls.frame_slider.setValue(snapshot.cursor)
+            if not self._slider_pressed:
+                self.controls.frame_slider.setValue(snapshot.cursor)
         with QSignalBlocker(self.controls.speed_combo):
             self.controls.speed_combo.setCurrentText(f'{snapshot.playback_speed:.2f}'.rstrip('0').rstrip('.'))
 

@@ -111,7 +111,7 @@ class ControlPanel(QWidget):
 
         self.speed_combo = QComboBox()
         self.speed_combo.setEditable(True)
-        self.speed_combo.addItems(['0.25', '0.5', '1.0', '2.0', '4.0'])
+        self.speed_combo.addItems(['0.1', '0.25', '0.5', '1.0', '2.0', '4.0'])
         self.speed_combo.setCurrentText('1.0')
 
         replay_layout.addWidget(self.start_btn, 0, 0)

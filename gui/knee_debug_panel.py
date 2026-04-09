@@ -6,7 +6,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -62,40 +61,49 @@ class KneeDebugPanel(QWidget):
         grid.setContentsMargins(12, 12, 12, 12)
         grid.setSpacing(8)
 
-        desc = QLabel('Selected knees share one live slider value. Replay display/compare uses daemon-equivalent clamped targets.')
+        desc = QLabel('Each knee has its own slider. Replay display/compare uses daemon-equivalent clamped targets.')
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #b0b0c0;")
-        grid.addWidget(desc, 0, 0, 1, 4)
+        grid.addWidget(desc, 0, 0, 1, 5)
 
         self.knee_checks: dict[int, QCheckBox] = {}
+        self.knee_sliders: dict[int, QSlider] = {}
+        self.knee_spins: dict[int, QDoubleSpinBox] = {}
+        self.knee_labels: dict[int, QLabel] = {}
+
         for col, (joint_idx, joint_name) in enumerate(zip(KNEE_INDICES, KNEE_NAMES)):
             cb = QCheckBox(joint_name)
-            cb.setChecked(col == 0)
-            cb.stateChanged.connect(self._emit_live_target)
+            cb.setChecked(True)
+            cb.stateChanged.connect(lambda _state, idx=joint_idx: self._on_check_changed(idx))
             self.knee_checks[joint_idx] = cb
             grid.addWidget(cb, 1, col)
 
-        grid.addWidget(QLabel('Value (rad)'), 2, 0)
-        self.value_spin = QDoubleSpinBox()
-        self.value_spin.setRange(-3.14, 3.14)
-        self.value_spin.setDecimals(4)
-        self.value_spin.setSingleStep(0.01)
-        self.value_spin.valueChanged.connect(self._spin_changed)
-        grid.addWidget(self.value_spin, 2, 1)
+        self.zero_btn = QPushButton('Zero all')
+        self.zero_btn.clicked.connect(self._zero_all)
+        grid.addWidget(self.zero_btn, 1, 4)
 
-        self.zero_btn = QPushButton('Zero selected')
-        self.zero_btn.clicked.connect(lambda: self.value_spin.setValue(0.0))
-        grid.addWidget(self.zero_btn, 2, 2)
+        for col, (joint_idx, joint_name) in enumerate(zip(KNEE_INDICES, KNEE_NAMES)):
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(-3140, 3140)
+            slider.setValue(0)
+            slider.valueChanged.connect(lambda _val, idx=joint_idx: self._slider_changed(idx))
+            self.knee_sliders[joint_idx] = slider
+            grid.addWidget(slider, 2, col)
 
-        self.live_label = QLabel('raw=0.0000  clamped=0.0000')
-        self.live_label.setStyleSheet("color: #b0b0c0; font-family: 'Consolas';")
-        grid.addWidget(self.live_label, 2, 3)
+            spin = QDoubleSpinBox()
+            spin.setRange(-3.14, 3.14)
+            spin.setDecimals(4)
+            spin.setSingleStep(0.01)
+            spin.valueChanged.connect(lambda _val, idx=joint_idx: self._spin_changed(idx))
+            self.knee_spins[joint_idx] = spin
+            grid.addWidget(spin, 3, col)
 
-        self.value_slider = QSlider(Qt.Orientation.Horizontal)
-        self.value_slider.setRange(-3140, 3140)
-        self.value_slider.setValue(0)
-        self.value_slider.valueChanged.connect(self._slider_changed)
-        grid.addWidget(self.value_slider, 3, 0, 1, 4)
+            lbl = QLabel('raw=0.0000  clamped=0.0000')
+            lbl.setStyleSheet("color: #b0b0c0; font-family: 'Consolas'; font-size: 10px;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.knee_labels[joint_idx] = lbl
+            grid.addWidget(lbl, 4, col)
+
         return box
 
     def _build_record_box(self) -> QWidget:
@@ -186,33 +194,39 @@ class KneeDebugPanel(QWidget):
         self.stop_record_btn.setEnabled(recording)
         self.record_btn.setText('Recording...' if recording else 'Record')
 
-    def set_slider_feedback(self, raw_value: float, clamped_value: float) -> None:
-        self.live_label.setText(f'raw={raw_value:.4f}  clamped={clamped_value:.4f}')
+    def set_slider_feedback(self, knee_idx: int, raw_value: float, clamped_value: float) -> None:
+        if knee_idx in self.knee_labels:
+            self.knee_labels[knee_idx].setText(f'raw={raw_value:.4f}  clamped={clamped_value:.4f}')
 
-    def _slider_changed(self, value: int) -> None:
+    def _slider_changed(self, joint_idx: int) -> None:
         if self._updating_widgets:
             return
         self._updating_widgets = True
         try:
-            self.value_spin.setValue(float(value) / 1000.0)
+            self.knee_spins[joint_idx].setValue(float(self.knee_sliders[joint_idx].value()) / 1000.0)
         finally:
             self._updating_widgets = False
-        self._emit_live_target()
+        self._emit_live_target(joint_idx)
 
-    def _spin_changed(self, value: float) -> None:
+    def _spin_changed(self, joint_idx: int) -> None:
         if self._updating_widgets:
             return
         self._updating_widgets = True
         try:
-            self.value_slider.setValue(int(round(float(value) * 1000.0)))
+            self.knee_sliders[joint_idx].setValue(int(round(float(self.knee_spins[joint_idx].value()) * 1000.0)))
         finally:
             self._updating_widgets = False
-        self._emit_live_target()
+        self._emit_live_target(joint_idx)
 
-    def _emit_live_target(self) -> None:
-        knees = self.selected_knees()
-        if knees:
-            self.target_changed.emit(knees, float(self.value_spin.value()))
+    def _on_check_changed(self, _joint_idx: int) -> None:
+        pass
+
+    def _zero_all(self) -> None:
+        for idx in KNEE_INDICES:
+            self.knee_spins[idx].setValue(0.0)
+
+    def _emit_live_target(self, joint_idx: int) -> None:
+        self.target_changed.emit([joint_idx], float(self.knee_spins[joint_idx].value()))
 
     def push(self, snapshot) -> None:  # noqa: ANN001
         real_src = snapshot.robot_state if snapshot.robot_state is not None else snapshot.mujoco_state
