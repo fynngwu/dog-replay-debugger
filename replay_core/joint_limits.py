@@ -4,8 +4,8 @@ import numpy as np
 
 from replay_core.constants import NUM_JOINTS
 
-# Mirrored from backend/daemon/motor_io.hpp so GUI replay uses the same semantics
-# as daemon set_joint.
+# Mirrored from dog_fifo_backend/daemon/motor_config.hpp so the GUI preview and
+# manual joint editor use the same joint semantics as the new backend.
 KNEE_RATIO = 1.667
 ACTION_SCALE = 0.25
 
@@ -28,13 +28,13 @@ JOINT_OFFSETS = np.array([
 XML_MIN = np.array([
     -0.7853982, -0.7853982, -0.7853982, -0.7853982,
     -1.2217658, -1.2217305, -0.8726999, -0.8726999,
-    -1.2217299 * KNEE_RATIO, -1.2217299 * KNEE_RATIO, -0.6, -0.6,
+    -1.0217299 * KNEE_RATIO, -1.0217299 * KNEE_RATIO, -0.6, -0.6,
 ], dtype=np.float64)
 
 XML_MAX = np.array([
     0.7853982, 0.7853982, 0.7853982, 0.7853982,
     0.8726683, 0.8726683, 1.2217342, 1.2217305,
-    0.6, 0.6, 1.2217287 * KNEE_RATIO, 1.2217287 * KNEE_RATIO,
+    0.6, 0.6, 1.0217287 * KNEE_RATIO, 1.0217287 * KNEE_RATIO,
 ], dtype=np.float64)
 
 LOWER_ABS = JOINT_OFFSETS + XML_MIN

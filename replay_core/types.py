@@ -31,6 +31,26 @@ class ReplaySequence:
 class JointState:
     positions: np.ndarray
     velocities: np.ndarray
+    torques: np.ndarray
+    timestamp_sec: float
+
+
+@dataclass(slots=True)
+class BackendState:
+    ok: bool
+    enabled: bool
+    worker_started: bool
+    busy: bool
+    init_in_progress: bool
+    queue_size: int
+    kp: Optional[float]
+    kd: Optional[float]
+    joint_positions: np.ndarray
+    joint_torques: np.ndarray
+    target_joint_positions: np.ndarray
+    last_sent_joint_positions: np.ndarray
+    last_error: str
+    raw_json: str
     timestamp_sec: float
 
 
@@ -49,6 +69,8 @@ class RuntimeSnapshot:
     robot_rx_hz: float
     robot_state: Optional[JointState]
     robot_state_age_s: Optional[float]
+    backend_state: Optional[BackendState]
+    backend_state_age_s: Optional[float]
     mujoco_loaded: bool
     mujoco_viewer_running: bool
     mujoco_apply_hz: float
@@ -67,3 +89,9 @@ class RuntimeSnapshot:
         if self.mujoco_state is None:
             return None
         return self.mujoco_state.positions - self.current_target
+
+    @property
+    def robot_torques(self) -> Optional[np.ndarray]:
+        if self.robot_state is None:
+            return None
+        return self.robot_state.torques

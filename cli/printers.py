@@ -26,14 +26,16 @@ def print_status(snapshot: RuntimeSnapshot) -> None:
         print(f'MuJoCo err: {fmt_array(snapshot.mujoco_error)}')
     if snapshot.robot_state is not None:
         print(f'Robot pos:  {fmt_array(snapshot.robot_state.positions)}')
+        print(f'Robot torques: {fmt_array(snapshot.robot_torques)}')
         print(f'Robot err:  {fmt_array(snapshot.robot_error)}')
 
 
 def print_joint_table(snapshot: RuntimeSnapshot) -> None:
-    print('joint          target    mujoco     robot   mj_err  robot_err')
-    print('-' * 66)
+    print('joint          target    mujoco     robot    torque   mj_err  robot_err')
+    print('-' * 80)
     mujoco = None if snapshot.mujoco_state is None else snapshot.mujoco_state.positions
     robot = None if snapshot.robot_state is None else snapshot.robot_state.positions
+    torques = snapshot.robot_torques
     mj_err = snapshot.mujoco_error
     rb_err = snapshot.robot_error
     for i, name in enumerate(JOINT_NAMES):
@@ -42,6 +44,7 @@ def print_joint_table(snapshot: RuntimeSnapshot) -> None:
             f'{snapshot.current_target[i]:>7.3f} '
             f'{"-" if mujoco is None else f"{mujoco[i]:7.3f}"} '
             f'{"-" if robot is None else f"{robot[i]:7.3f}"} '
+            f'{"-" if torques is None else f"{torques[i]:7.2f}"} '
             f'{"-" if mj_err is None else f"{mj_err[i]:7.3f}"} '
             f'{"-" if rb_err is None else f"{rb_err[i]:7.3f}"}'
         )

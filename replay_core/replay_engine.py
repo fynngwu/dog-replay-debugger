@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 from typing import Optional
@@ -10,6 +11,7 @@ from adapters.mujoco_adapter import MujocoAdapter
 from adapters.null_robot_adapter import NullRobotAdapter
 from adapters.robot_adapter import RobotAdapter
 from replay_core.config import EngineConfig
+from replay_core.constants import NUM_JOINTS
 from replay_core.csv_loader import CsvLoadError, load_replay_csv
 from replay_core.joint_limits import clamp_relative_targets
 from replay_core.sync_bus import SharedStateBus
@@ -74,14 +76,101 @@ class ReplayEngine:
         return self.robot.init(duration_s)
 
     def robot_enable(self):
-        if not isinstance(self.robot, RobotAdapter):
-            return {'ok': False, 'msg': 'robot is not connected'}
-        return self.robot.enable()
+        self.bus.log('dog_fifo_backend has no standalone enable command; use init instead')
+        return {'ok': False, 'msg': 'dog_fifo_backend has no standalone enable command; use init instead'}
 
     def robot_disable(self):
         if not isinstance(self.robot, RobotAdapter):
             return {'ok': False, 'msg': 'robot is not connected'}
         return self.robot.disable()
+
+    def robot_set_mit_param(self, kp: float, kd: float, vel_limit: float, torque_limit: float):
+        if not isinstance(self.robot, RobotAdapter):
+            return {'ok': False, 'msg': 'robot is not connected'}
+        return self.robot.set_mit_param(kp, kd, vel_limit, torque_limit)
+
+    def robot_set_zero_joint(self, joint_idx: int):
+        if not isinstance(self.robot, RobotAdapter):
+            return {'ok': False, 'msg': 'robot is not connected'}
+        return self.robot.set_zero_joint(joint_idx)
+
+    def robot_set_zero_all(self):
+        if not isinstance(self.robot, RobotAdapter):
+            return {'ok': False, 'msg': 'robot is not connected'}
+        results = []
+        failures = []
+        for joint_idx in range(NUM_JOINTS):
+            reply = self.robot.set_zero_joint(joint_idx)
+            item = {'joint_idx': int(joint_idx), 'reply': reply}
+            results.append(item)
+            if not reply.get('ok', False):
+                failures.append(item)
+            time.sleep(0.03)
+        if failures:
+            msg = f'setzero finished with {len(failures)} failure(s)'
+        else:
+            msg = f'setzero sent to all {NUM_JOINTS} joints'
+        self.bus.log(msg)
+        return {'ok': not failures, 'msg': msg, 'results': results, 'failures': failures}
+
+    def _run_remote_ssh_command(self, host: str, ssh_user: str, remote_command: str, timeout_s: float = 15.0):
+        target = f'{ssh_user}@{host}'
+        self.bus.log(f'SSH exec on {target}: {remote_command}')
+        try:
+            completed = subprocess.run(
+                ['ssh', target, 'bash', '-lc', remote_command],
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            msg = f'SSH command timed out after {timeout_s:.1f}s'
+            self.bus.log(msg)
+            return {
+                'ok': False,
+                'msg': msg,
+                'stdout': (exc.stdout or '').strip(),
+                'stderr': (exc.stderr or '').strip(),
+                'returncode': None,
+            }
+        except Exception as exc:
+            msg = f'SSH command failed: {exc}'
+            self.bus.log(msg)
+            return {'ok': False, 'msg': msg, 'stdout': '', 'stderr': '', 'returncode': None}
+
+        stdout = (completed.stdout or '').strip()
+        stderr = (completed.stderr or '').strip()
+        ok = completed.returncode == 0
+        msg = f'SSH exit code {completed.returncode}'
+        if stdout:
+            self.bus.log(f'SSH stdout: {stdout}')
+        if stderr:
+            self.bus.log(f'SSH stderr: {stderr}')
+        return {'ok': ok, 'msg': msg, 'stdout': stdout, 'stderr': stderr, 'returncode': completed.returncode}
+
+    def remote_kill_backend(self, host: str, ssh_user: str = 'ares'):
+        remote_command = (
+            'tmux kill-session -t dog_backend 2>/dev/null; '
+            'sudo -n pkill -9 dog_fifo_backend || pkill -9 dog_fifo_backend || true; '
+            'sleep 0.3; '
+            'if pgrep dog_fifo_backend >/dev/null 2>&1; then '
+            'echo warning:process_still_running; '
+            'exit 1; '
+            'else '
+            'echo dog_backend_stopped; '
+            'fi'
+        )
+        return self._run_remote_ssh_command(host=host, ssh_user=ssh_user, remote_command=remote_command, timeout_s=15.0)
+
+    def remote_start_backend(self, host: str, ssh_user: str = 'ares'):
+        remote_command = (
+            'tmux kill-session -t dog_backend 2>/dev/null; '
+            'tmux new-session -d -s dog_backend -c ~/backend && '
+            'tmux send-keys -t dog_backend "cd ~/backend && ./build/dog_fifo_backend 2>&1 | tee /tmp/dog_backend.log" Enter; '
+            'sleep 0.8; '
+            'tmux capture-pane -t dog_backend -p -S -3'
+        )
+        return self._run_remote_ssh_command(host=host, ssh_user=ssh_user, remote_command=remote_command, timeout_s=15.0)
 
     def set_playback_speed(self, speed: float) -> float:
         safe = max(0.01, float(speed))
@@ -178,12 +267,15 @@ class ReplayEngine:
                 return
             start_cursor = self.bus.current_cursor()
             start_time_sec = sequence.frames[start_cursor].time_sec
-            speed = max(0.01, self.bus.snapshot().playback_speed)
-        start_wall = time.monotonic()
+        replay_time = start_time_sec
+        last_wall = time.monotonic()
         idx = start_cursor
         while not self._play_stop.is_set() and sequence is not None and idx < sequence.total_frames:
-            elapsed = time.monotonic() - start_wall
-            replay_time = start_time_sec + elapsed * speed
+            now = time.monotonic()
+            dt = now - last_wall
+            last_wall = now
+            speed = max(0.01, self.bus.snapshot().playback_speed)
+            replay_time += dt * speed
             while idx + 1 < sequence.total_frames and sequence.frames[idx + 1].time_sec <= replay_time:
                 idx += 1
             with self._lock:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import csv
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import List
 
+import numpy as np
 from PySide6.QtCore import QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,14 +23,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui.backend_state_panel import BackendStatePanel
 from gui.control_panel import ControlPanel
-from gui.curves_panel import CurvesPanel
 from gui.joint_dashboard import JointDashboard
 from gui.knee_debug_panel import KneeDebugPanel
 from gui.status_panel import StatusPanel
 from gui.styles import MODERN_STYLE
 from replay_core.constants import JOINT_NAMES
-from replay_core.joint_limits import clamp_single_relative_target
 from replay_core.replay_engine import ReplayEngine
 
 
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
         self.controls = ControlPanel()
         self.dashboard = JointDashboard()
         self.status_panel = StatusPanel()
-        self.curves = CurvesPanel()
+        self.overview_state = BackendStatePanel('Backend Stream State (Overview tab)')
         self.knee_debug = KneeDebugPanel()
         self.logs = QPlainTextEdit()
         self.logs.setReadOnly(True)
@@ -61,8 +62,6 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(20)
-
-        self.dashboard.joint_selected.connect(self._on_joint_selected)
 
     def _setup_ui(self) -> None:
         main_widget = QWidget()
@@ -107,7 +106,7 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(self._create_overview_tab(), 'Overview')
-        tabs.addTab(self.knee_debug, 'Knee Debug')
+        tabs.addTab(self.knee_debug, 'Joint Debug')
         layout.addWidget(tabs)
         return panel
 
@@ -117,8 +116,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self.dashboard)
-        self.curves.setMaximumHeight(280)
-        layout.addWidget(self.curves)
+        layout.addWidget(self.overview_state)
         return panel
 
     def _wire_actions(self) -> None:
@@ -128,10 +126,12 @@ class MainWindow(QMainWindow):
         c.csv_load.clicked.connect(self._load_csv_from_ui)
         c.xml_load.clicked.connect(self._load_xml_from_ui)
         c.connect_btn.clicked.connect(self._connect_robot)
-        c.ping_btn.clicked.connect(lambda: self.engine.robot_ping())
-        c.init_btn.clicked.connect(lambda: self.engine.robot_init())
-        c.enable_btn.clicked.connect(lambda: self.engine.robot_enable())
-        c.disable_btn.clicked.connect(lambda: self.engine.robot_disable())
+        c.init_btn.clicked.connect(self._robot_init)
+        c.disable_btn.clicked.connect(self._robot_disable)
+        c.set_all_zero_btn.clicked.connect(self._set_zero_all)
+        c.kill_backend_btn.clicked.connect(self._kill_remote_backend)
+        c.start_backend_btn.clicked.connect(self._start_remote_backend)
+        c.apply_mit_btn.clicked.connect(self._apply_mit_params)
         c.start_btn.clicked.connect(self._start)
         c.stop_btn.clicked.connect(self.engine.stop)
         c.prev_btn.clicked.connect(self.engine.prev)
@@ -141,13 +141,13 @@ class MainWindow(QMainWindow):
         c.frame_slider.sliderReleased.connect(self._seek_from_slider_release)
         c.record_btn.clicked.connect(self._start_recording)
         c.stop_record_btn.clicked.connect(self._stop_recording)
+        c.speed_input.editingFinished.connect(self._on_speed_changed)
 
         self.knee_debug.record_requested.connect(self._start_recording)
         self.knee_debug.stop_record_requested.connect(self._stop_recording)
-        self.knee_debug.target_changed.connect(self._apply_knee_slider)
-
-        c.speed_combo.editTextChanged.connect(self._on_speed_changed)
-        c.speed_combo.currentTextChanged.connect(self._on_speed_changed)
+        self.knee_debug.send_all_requested.connect(self._send_manual_target)
+        self.knee_debug.send_single_requested.connect(self._send_manual_target)
+        self.knee_debug.set_zero_requested.connect(self._set_zero_joint)
 
     def _project_root(self) -> Path:
         return Path(__file__).resolve().parent.parent
@@ -184,16 +184,12 @@ class MainWindow(QMainWindow):
 
     def _load_csv_from_ui(self) -> None:
         path = self.controls.csv_path.text().strip()
-        if not path:
-            return
-        if not self.engine.load_csv(path):
+        if path and not self.engine.load_csv(path):
             QMessageBox.warning(self, 'CSV load failed', 'Could not load CSV. See log panel for details.')
 
     def _load_xml_from_ui(self) -> None:
         path = self.controls.xml_path.text().strip()
-        if not path:
-            return
-        if not self.engine.load_mujoco(path, start_viewer=True):
+        if path and not self.engine.load_mujoco(path, start_viewer=True):
             QMessageBox.warning(self, 'MuJoCo load failed', 'Could not load MuJoCo XML. See log panel for details.')
 
     def _connect_robot(self) -> None:
@@ -205,19 +201,73 @@ class MainWindow(QMainWindow):
         if not ok:
             QMessageBox.warning(self, 'Robot connect failed', 'Could not connect to robot. See log panel for details.')
 
+    def _robot_init(self) -> None:
+        reply = self.engine.robot_init()
+        if not reply.get('ok', False):
+            QMessageBox.warning(self, 'Init failed', str(reply))
+
+    def _robot_disable(self) -> None:
+        reply = self.engine.robot_disable()
+        if not reply.get('ok', False):
+            QMessageBox.warning(self, 'Disable failed', str(reply))
+
+    def _apply_mit_params(self) -> None:
+        reply = self.engine.robot_set_mit_param(
+            self.controls.kp_spin.value(),
+            self.controls.kd_spin.value(),
+            self.controls.vel_limit_spin.value(),
+            self.controls.torque_limit_spin.value(),
+        )
+        if not reply.get('ok', False):
+            QMessageBox.warning(self, 'MIT param failed', str(reply))
+
+    def _set_zero_joint(self, joint_idx: int) -> None:
+        reply = self.engine.robot_set_zero_joint(joint_idx)
+        if not reply.get('ok', False):
+            QMessageBox.warning(self, 'SetZero failed', str(reply))
+
+    def _set_zero_all(self) -> None:
+        reply = self.engine.robot_set_zero_all()
+        if not reply.get('ok', False):
+            QMessageBox.warning(self, 'Set All Zero failed', str(reply))
+
+    def _ssh_host(self) -> str:
+        return self.controls.host.text().strip() or '10.20.127.185'
+
+    def _run_remote_backend_job(self, label: str, func) -> None:  # noqa: ANN001
+        host = self._ssh_host()
+        self.engine.bus.log(f'{label} requested for ares@{host}')
+
+        def worker() -> None:
+            reply = func(host)
+            status = 'ok' if reply.get('ok', False) else 'failed'
+            self.engine.bus.log(f'{label} {status}: {reply.get("msg", "")}'.strip())
+            stdout = str(reply.get('stdout', '')).strip()
+            stderr = str(reply.get('stderr', '')).strip()
+            if stdout:
+                self.engine.bus.log(f'{label} stdout: {stdout}')
+            if stderr:
+                self.engine.bus.log(f'{label} stderr: {stderr}')
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _kill_remote_backend(self) -> None:
+        self._run_remote_backend_job('SSH kill backend', self.engine.remote_kill_backend)
+
+    def _start_remote_backend(self) -> None:
+        self._run_remote_backend_job('SSH start backend', self.engine.remote_start_backend)
+
     def _parse_speed(self) -> float:
         try:
-            return max(0.01, float(self.controls.speed_combo.currentText().strip()))
+            return max(0.01, float(self.controls.speed_input.text().strip()))
         except Exception:
-            self.controls.speed_combo.setCurrentText('1.0')
+            self.controls.speed_input.setText('1.0')
             return 1.0
 
-    def _on_speed_changed(self, text: str) -> None:
-        try:
-            speed = max(0.01, float(text.strip()))
-        except Exception:
-            return
+    def _on_speed_changed(self) -> None:
+        speed = self._parse_speed()
         self.engine.set_playback_speed(speed)
+        self.controls.speed_input.setText(f'{speed:.2f}'.rstrip('0').rstrip('.'))
 
     def _start(self) -> None:
         self.engine.start(self.controls.frame_spin.value(), speed=self._parse_speed())
@@ -239,21 +289,10 @@ class MainWindow(QMainWindow):
     def _on_slider_pressed(self) -> None:
         self._slider_pressed = True
 
-    def _on_joint_selected(self, joint_name: str) -> None:
-        if joint_name in JOINT_NAMES:
-            idx = JOINT_NAMES.index(joint_name)
-            if hasattr(self.curves, 'joint_combo') and self.curves.joint_combo:
-                self.curves.joint_combo.setCurrentIndex(idx)
-
-    def _apply_knee_slider(self, knee_indices: list[int], raw_value: float) -> None:
-        snapshot = self.engine.get_snapshot()
-        raw_target = snapshot.current_target_raw.copy()
-        for joint_idx in knee_indices:
-            raw_target[joint_idx] = float(raw_value)
-        self.engine.set_manual_target(raw_target)
-        for joint_idx in knee_indices:
-            preview_clamped = clamp_single_relative_target(joint_idx, raw_value)
-            self.knee_debug.set_slider_feedback(joint_idx, raw_value, preview_clamped)
+    def _send_manual_target(self, values: list[float]) -> None:
+        target = np.asarray(values, dtype=np.float64)
+        if not self.engine.set_manual_target(target):
+            QMessageBox.warning(self, 'Send joint failed', 'Failed to send manual target. See logs for details.')
 
     def _set_recording_state(self, recording: bool) -> None:
         self._recording = recording
@@ -315,12 +354,18 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(self.controls.frame_slider):
             if not self._slider_pressed:
                 self.controls.frame_slider.setValue(snapshot.cursor)
-        with QSignalBlocker(self.controls.speed_combo):
-            self.controls.speed_combo.setCurrentText(f'{snapshot.playback_speed:.2f}'.rstrip('0').rstrip('.'))
+        with QSignalBlocker(self.controls.speed_input):
+            self.controls.speed_input.setText(f'{snapshot.playback_speed:.2f}'.rstrip('0').rstrip('.'))
+
+        if snapshot.backend_state is not None:
+            if snapshot.backend_state.kp is not None:
+                self.controls.kp_spin.setValue(snapshot.backend_state.kp)
+            if snapshot.backend_state.kd is not None:
+                self.controls.kd_spin.setValue(snapshot.backend_state.kd)
 
         self.dashboard.update_all(snapshot)
         self.status_panel.update_status(snapshot)
-        self.curves.push(snapshot)
+        self.overview_state.update_snapshot(snapshot)
         self.knee_debug.push(snapshot)
 
         if len(snapshot.log_lines) != self._last_log_count:

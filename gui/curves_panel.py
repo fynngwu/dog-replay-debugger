@@ -60,10 +60,12 @@ class CurvesPanel(QWidget):
         pen_target = pg.mkPen(color='#00e5ff', width=2)
         pen_mujoco = pg.mkPen(color='#69f0ae', width=2)
         pen_robot = pg.mkPen(color='#ffd740', width=2)
+        pen_torque = pg.mkPen(color='#ff5252', width=2)
 
         self.curve_target = self.plot.plot(name='target', pen=pen_target)
         self.curve_mujoco = self.plot.plot(name='mujoco', pen=pen_mujoco)
         self.curve_robot = self.plot.plot(name='robot', pen=pen_robot)
+        self.curve_torque = self.plot.plot(name='torque', pen=pen_torque)
 
         layout.addWidget(self.plot)
 
@@ -72,6 +74,7 @@ class CurvesPanel(QWidget):
         self.target = deque(maxlen=400)
         self.mujoco = deque(maxlen=400)
         self.robot = deque(maxlen=400)
+        self.torque = deque(maxlen=400)
         self._counter = 0
 
     def push(self, snapshot) -> None:  # noqa: ANN001
@@ -89,11 +92,15 @@ class CurvesPanel(QWidget):
         self.robot.append(
             None if snapshot.robot_state is None else float(snapshot.robot_state.positions[idx])
         )
+        self.torque.append(
+            None if snapshot.robot_torques is None else float(snapshot.robot_torques[idx])
+        )
 
         x = list(self.x)
         self.curve_target.setData(x, [0.0 if v is None else v for v in self.target])
         self.curve_mujoco.setData(x, [0.0 if v is None else v for v in self.mujoco])
         self.curve_robot.setData(x, [0.0 if v is None else v for v in self.robot])
+        self.curve_torque.setData(x, [0.0 if v is None else v for v in self.torque])
 
     def set_joint(self, joint_name: str) -> None:
         """Set the current joint to display."""
@@ -105,4 +112,5 @@ class CurvesPanel(QWidget):
             self.target.clear()
             self.mujoco.clear()
             self.robot.clear()
+            self.torque.clear()
             self._counter = 0

@@ -11,6 +11,7 @@ import numpy as np
 from replay_core.constants import NUM_JOINTS
 from replay_core.metrics import RateTracker
 from replay_core.sync_bus import SharedStateBus
+from replay_core.types import BackendState
 
 
 class RobotAdapter:
@@ -31,6 +32,8 @@ class RobotAdapter:
         self._rx_thread: Optional[threading.Thread] = None
         self._tx_rate = RateTracker()
         self._rx_rate = RateTracker()
+        self._tx_timeout_streak = 0
+        self._tx_reconnect_threshold = 3
 
     @property
     def connected(self) -> bool:
@@ -53,6 +56,7 @@ class RobotAdapter:
 
         self.bus.set_robot_connected(True)
         self.bus.log(f'Robot connected to {self.host}:{self.cmd_port}/{self.state_port}')
+        self._tx_timeout_streak = 0
         self._stop.clear()
         self._tx_thread = threading.Thread(target=self._tx_loop, daemon=True)
         self._rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
@@ -79,29 +83,69 @@ class RobotAdapter:
                     pass
         self._cmd_sock = None
         self._state_sock = None
+        self._tx_timeout_streak = 0
         self.bus.set_robot_connected(False)
         self.bus.set_robot_rates(0.0, 0.0)
 
     def _send_command(self, command: str, timeout: Optional[float] = None) -> Dict[str, Any]:
-        if self._cmd_sock is None:
-            raise RuntimeError('robot command socket is not connected')
         payload = (command.strip() + '\n').encode('utf-8')
         with self._cmd_lock:
-            old_timeout = self._cmd_sock.gettimeout()
+            sock = self._cmd_sock
+            if sock is None:
+                raise RuntimeError('robot command socket is not connected')
+            old_timeout = sock.gettimeout()
             if timeout is not None:
-                self._cmd_sock.settimeout(timeout)
+                sock.settimeout(timeout)
             try:
-                self._cmd_sock.sendall(payload)
+                sock.sendall(payload)
                 buffer = b''
                 while b'\n' not in buffer:
-                    chunk = self._cmd_sock.recv(4096)
+                    chunk = sock.recv(4096)
                     if not chunk:
                         raise RuntimeError('robot command socket closed')
                     buffer += chunk
             finally:
-                self._cmd_sock.settimeout(old_timeout)
+                try:
+                    sock.settimeout(old_timeout)
+                except OSError:
+                    pass
         reply = json.loads(buffer.split(b'\n', 1)[0].decode('utf-8'))
         return reply
+
+    @staticmethod
+    def _is_timeout_error(exc: Exception) -> bool:
+        if isinstance(exc, (socket.timeout, TimeoutError)):
+            return True
+        return 'timed out' in str(exc).lower()
+
+    def _reconnect_cmd_socket(self) -> bool:
+        if self._stop.is_set():
+            return False
+        if not self.host or self.cmd_port <= 0:
+            self.bus.log('Robot TX reconnect skipped: host/port not set')
+            return False
+        try:
+            new_sock = socket.create_connection((self.host, self.cmd_port), timeout=self.timeout_s)
+            new_sock.settimeout(self.timeout_s)
+        except OSError as exc:
+            self.bus.log(f'Robot TX reconnect failed: {exc}')
+            return False
+
+        old_sock: Optional[socket.socket]
+        with self._cmd_lock:
+            old_sock = self._cmd_sock
+            self._cmd_sock = new_sock
+
+        if old_sock is not None:
+            try:
+                old_sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                old_sock.close()
+            except OSError:
+                pass
+        return True
 
     def ping(self) -> bool:
         try:
@@ -122,15 +166,6 @@ class RobotAdapter:
             self.bus.log(f'Robot init failed: {exc}')
             return {'ok': False, 'msg': str(exc)}
 
-    def enable(self) -> Dict[str, Any]:
-        try:
-            reply = self._send_command('enable')
-            self.bus.log(f'Robot enable reply: {reply}')
-            return reply
-        except Exception as exc:
-            self.bus.log(f'Robot enable failed: {exc}')
-            return {'ok': False, 'msg': str(exc)}
-
     def disable(self) -> Dict[str, Any]:
         try:
             reply = self._send_command('disable')
@@ -138,6 +173,26 @@ class RobotAdapter:
             return reply
         except Exception as exc:
             self.bus.log(f'Robot disable failed: {exc}')
+            return {'ok': False, 'msg': str(exc)}
+
+    def set_mit_param(self, kp: float, kd: float, vel_limit: float, torque_limit: float) -> Dict[str, Any]:
+        try:
+            reply = self._send_command(
+                f'set_mit_param {float(kp):.6f} {float(kd):.6f} {float(vel_limit):.6f} {float(torque_limit):.6f}'
+            )
+            self.bus.log(f'Robot MIT param reply: {reply}')
+            return reply
+        except Exception as exc:
+            self.bus.log(f'Robot MIT param failed: {exc}')
+            return {'ok': False, 'msg': str(exc)}
+
+    def set_zero_joint(self, joint_idx: int) -> Dict[str, Any]:
+        try:
+            reply = self._send_command(f'setzero {int(joint_idx)}')
+            self.bus.log(f'Robot setzero reply: {reply}')
+            return reply
+        except Exception as exc:
+            self.bus.log(f'Robot setzero failed: {exc}')
             return {'ok': False, 'msg': str(exc)}
 
     def _set_joint(self, targets_rad: np.ndarray) -> None:
@@ -152,20 +207,35 @@ class RobotAdapter:
             if self._cmd_sock is None:
                 break
             try:
+                sent = False
                 if self.bus.is_playing():
                     target = self.bus.get_target()
                     self._set_joint(target)
-                    self._tx_rate.tick()
+                    sent = True
                 else:
                     current_seq = self.bus.get_robot_command_seq()
                     if current_seq != last_robot_seq:
                         target = self.bus.get_target()
                         self._set_joint(target)
                         last_robot_seq = current_seq
-                        self._tx_rate.tick()
+                        sent = True
+                if sent:
+                    self._tx_rate.tick()
+                    self._tx_timeout_streak = 0
                 self.bus.set_robot_rates(self._tx_rate.value(), self._rx_rate.value())
             except Exception as exc:
-                self.bus.log(f'Robot TX error: {exc}')
+                if self._is_timeout_error(exc):
+                    self._tx_timeout_streak += 1
+                    self.bus.log(f'Robot TX timeout ({self._tx_timeout_streak}): {exc}')
+                    if self._tx_timeout_streak >= self._tx_reconnect_threshold:
+                        if self._reconnect_cmd_socket():
+                            self.bus.log('Robot TX command socket reconnected')
+                            self._tx_timeout_streak = 0
+                        else:
+                            self.bus.log('Robot TX command socket reconnect failed')
+                else:
+                    self._tx_timeout_streak = 0
+                    self.bus.log(f'Robot TX error: {exc}')
                 time.sleep(0.2)
             time.sleep(self.tx_period_s)
 
@@ -191,15 +261,43 @@ class RobotAdapter:
                 if not raw.strip():
                     continue
                 try:
-                    payload = json.loads(raw.decode('utf-8'))
+                    text = raw.decode('utf-8')
+                    payload = json.loads(text)
                     state = payload.get('state', payload)
+                    now = time.monotonic()
+
                     positions = np.asarray(state.get('joint_positions', []), dtype=np.float64)
-                    velocities = np.asarray(state.get('joint_velocities', [0.0] * NUM_JOINTS), dtype=np.float64)
                     if positions.shape[0] != NUM_JOINTS:
                         continue
-                    if velocities.shape[0] != NUM_JOINTS:
-                        velocities = np.zeros(NUM_JOINTS, dtype=np.float64)
-                    self.bus.update_robot_state(positions, velocities, time.monotonic())
+                    torques = np.asarray(state.get('joint_torques', [0.0] * NUM_JOINTS), dtype=np.float64)
+                    if torques.shape[0] != NUM_JOINTS:
+                        torques = np.zeros(NUM_JOINTS, dtype=np.float64)
+                    target_joint_positions = np.asarray(state.get('target_joint_positions', [0.0] * NUM_JOINTS), dtype=np.float64)
+                    if target_joint_positions.shape[0] != NUM_JOINTS:
+                        target_joint_positions = np.zeros(NUM_JOINTS, dtype=np.float64)
+                    last_sent_joint_positions = np.asarray(state.get('last_sent_joint_positions', [0.0] * NUM_JOINTS), dtype=np.float64)
+                    if last_sent_joint_positions.shape[0] != NUM_JOINTS:
+                        last_sent_joint_positions = np.zeros(NUM_JOINTS, dtype=np.float64)
+
+                    backend_state = BackendState(
+                        ok=bool(state.get('ok', payload.get('ok', True))),
+                        enabled=bool(state.get('enabled', False)),
+                        worker_started=bool(state.get('worker_started', False)),
+                        busy=bool(state.get('busy', False)),
+                        init_in_progress=bool(state.get('init_in_progress', False)),
+                        queue_size=int(state.get('queue_size', 0)),
+                        kp=None if state.get('kp') is None else float(state.get('kp')),
+                        kd=None if state.get('kd') is None else float(state.get('kd')),
+                        joint_positions=positions,
+                        joint_torques=torques,
+                        target_joint_positions=target_joint_positions,
+                        last_sent_joint_positions=last_sent_joint_positions,
+                        last_error=str(state.get('last_error', '')),
+                        raw_json=text,
+                        timestamp_sec=now,
+                    )
+                    self.bus.update_backend_state(backend_state)
+                    self.bus.update_robot_state(positions, np.zeros(NUM_JOINTS, dtype=np.float64), np.zeros(NUM_JOINTS, dtype=np.float64), now)
                     self._rx_rate.tick()
                     self.bus.set_robot_rates(self._tx_rate.value(), self._rx_rate.value())
                 except Exception as exc:

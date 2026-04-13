@@ -8,7 +8,7 @@ from typing import Deque, Optional
 import numpy as np
 
 from replay_core.constants import NUM_JOINTS
-from replay_core.types import JointState, ReplaySequence, RuntimeSnapshot
+from replay_core.types import BackendState, JointState, ReplaySequence, RuntimeSnapshot
 
 
 class SharedStateBus:
@@ -26,6 +26,7 @@ class SharedStateBus:
         self._robot_tx_hz = 0.0
         self._robot_rx_hz = 0.0
         self._robot_state: Optional[JointState] = None
+        self._backend_state: Optional[BackendState] = None
         self._mujoco_loaded = False
         self._mujoco_viewer_running = False
         self._mujoco_apply_hz = 0.0
@@ -119,12 +120,33 @@ class SharedStateBus:
             self._robot_tx_hz = float(tx_hz)
             self._robot_rx_hz = float(rx_hz)
 
-    def update_robot_state(self, positions: np.ndarray, velocities: np.ndarray, timestamp_sec: float) -> None:
+    def update_robot_state(self, positions: np.ndarray, velocities: np.ndarray, torques: np.ndarray, timestamp_sec: float) -> None:
         with self._lock:
             self._robot_state = JointState(
                 positions=np.array(positions, dtype=np.float64),
                 velocities=np.array(velocities, dtype=np.float64),
+                torques=np.array(torques, dtype=np.float64),
                 timestamp_sec=float(timestamp_sec),
+            )
+
+    def update_backend_state(self, backend_state: BackendState) -> None:
+        with self._lock:
+            self._backend_state = BackendState(
+                ok=bool(backend_state.ok),
+                enabled=bool(backend_state.enabled),
+                worker_started=bool(backend_state.worker_started),
+                busy=bool(backend_state.busy),
+                init_in_progress=bool(backend_state.init_in_progress),
+                queue_size=int(backend_state.queue_size),
+                kp=None if backend_state.kp is None else float(backend_state.kp),
+                kd=None if backend_state.kd is None else float(backend_state.kd),
+                joint_positions=np.array(backend_state.joint_positions, dtype=np.float64),
+                joint_torques=np.array(backend_state.joint_torques, dtype=np.float64),
+                target_joint_positions=np.array(backend_state.target_joint_positions, dtype=np.float64),
+                last_sent_joint_positions=np.array(backend_state.last_sent_joint_positions, dtype=np.float64),
+                last_error=str(backend_state.last_error),
+                raw_json=str(backend_state.raw_json),
+                timestamp_sec=float(backend_state.timestamp_sec),
             )
 
     def set_mujoco_status(self, loaded: bool, viewer_running: bool) -> None:
@@ -141,6 +163,7 @@ class SharedStateBus:
             self._mujoco_state = JointState(
                 positions=np.array(positions, dtype=np.float64),
                 velocities=np.array(velocities, dtype=np.float64),
+                torques=np.zeros(NUM_JOINTS, dtype=np.float64),
                 timestamp_sec=float(timestamp_sec),
             )
 
@@ -150,7 +173,27 @@ class SharedStateBus:
             csv_path = None if self._sequence is None else str(self._sequence.csv_path)
             total_frames = 0 if self._sequence is None else self._sequence.total_frames
             robot_state_age = None if self._robot_state is None else max(0.0, now - self._robot_state.timestamp_sec)
+            backend_state_age = None if self._backend_state is None else max(0.0, now - self._backend_state.timestamp_sec)
             mujoco_state_age = None if self._mujoco_state is None else max(0.0, now - self._mujoco_state.timestamp_sec)
+            backend_state = None
+            if self._backend_state is not None:
+                backend_state = BackendState(
+                    ok=bool(self._backend_state.ok),
+                    enabled=bool(self._backend_state.enabled),
+                    worker_started=bool(self._backend_state.worker_started),
+                    busy=bool(self._backend_state.busy),
+                    init_in_progress=bool(self._backend_state.init_in_progress),
+                    queue_size=int(self._backend_state.queue_size),
+                    kp=None if self._backend_state.kp is None else float(self._backend_state.kp),
+                    kd=None if self._backend_state.kd is None else float(self._backend_state.kd),
+                    joint_positions=self._backend_state.joint_positions.copy(),
+                    joint_torques=self._backend_state.joint_torques.copy(),
+                    target_joint_positions=self._backend_state.target_joint_positions.copy(),
+                    last_sent_joint_positions=self._backend_state.last_sent_joint_positions.copy(),
+                    last_error=str(self._backend_state.last_error),
+                    raw_json=str(self._backend_state.raw_json),
+                    timestamp_sec=float(self._backend_state.timestamp_sec),
+                )
             return RuntimeSnapshot(
                 csv_path=csv_path,
                 sequence_loaded=self._sequence is not None,
@@ -163,12 +206,14 @@ class SharedStateBus:
                 robot_connected=self._robot_connected,
                 robot_tx_hz=self._robot_tx_hz,
                 robot_rx_hz=self._robot_rx_hz,
-                robot_state=None if self._robot_state is None else JointState(self._robot_state.positions.copy(), self._robot_state.velocities.copy(), self._robot_state.timestamp_sec),
+                robot_state=None if self._robot_state is None else JointState(self._robot_state.positions.copy(), self._robot_state.velocities.copy(), self._robot_state.torques.copy(), self._robot_state.timestamp_sec),
                 robot_state_age_s=robot_state_age,
+                backend_state=backend_state,
+                backend_state_age_s=backend_state_age,
                 mujoco_loaded=self._mujoco_loaded,
                 mujoco_viewer_running=self._mujoco_viewer_running,
                 mujoco_apply_hz=self._mujoco_apply_hz,
-                mujoco_state=None if self._mujoco_state is None else JointState(self._mujoco_state.positions.copy(), self._mujoco_state.velocities.copy(), self._mujoco_state.timestamp_sec),
+                mujoco_state=None if self._mujoco_state is None else JointState(self._mujoco_state.positions.copy(), self._mujoco_state.velocities.copy(), self._mujoco_state.torques.copy(), self._mujoco_state.timestamp_sec),
                 mujoco_state_age_s=mujoco_state_age,
                 log_lines=list(self._logs),
             )

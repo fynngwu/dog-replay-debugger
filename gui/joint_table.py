@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
 
 
 class JointTable(QTableWidget):
-    HEADERS = ['Joint', 'Target', 'MuJoCo', 'Robot', 'MuJoCo Err', 'Robot Err']
+    HEADERS = ['Joint', 'Target', 'MuJoCo', 'Robot', 'Torque', 'MuJoCo Err', 'Robot Err']
 
     def __init__(self):
         super().__init__(12, len(self.HEADERS))

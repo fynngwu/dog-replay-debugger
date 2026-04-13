@@ -17,13 +17,8 @@ class JointCard(QFrame):
         ("Target", 1, "val"),
         ("MuJoCo", 2, "val"),
         ("Robot", 3, "val"),
-        ("Err_M", 4, "val_error"),
-        ("Err_R", 5, "val_error"),
+        ("Torque", 4, "val_torque"),
     ]
-
-    # Error thresholds
-    ERROR_THRESHOLD_HIGH = 0.1
-    ERROR_THRESHOLD_WARN = 0.05
 
     def __init__(self, name: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -80,8 +75,7 @@ class JointCard(QFrame):
         target: float,
         mujoco: float | None,
         robot: float | None,
-        err_m: float | None,
-        err_r: float | None,
+        torque: float | None,
     ) -> None:
         """Update the card with new data."""
         # Update target
@@ -93,33 +87,20 @@ class JointCard(QFrame):
         # Update robot position
         self.labels["Robot"].setText(f"{robot:.4f}" if robot is not None else "--")
 
-        # Update MuJoCo error with color coding
-        if err_m is not None:
-            self.labels["Err_M"].setText(f"{err_m:.4f}")
-            abs_err = abs(err_m)
-            if abs_err > self.ERROR_THRESHOLD_HIGH:
-                self.labels["Err_M"].setStyleSheet("color: #ff5252; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
-            elif abs_err > self.ERROR_THRESHOLD_WARN:
-                self.labels["Err_M"].setStyleSheet("color: #ffd740; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
+        # Update torque
+        if torque is not None:
+            self.labels["Torque"].setText(f"{torque:.3f}")
+            abs_torque = abs(torque)
+            if abs_torque > 10.0:
+                self.labels["Torque"].setStyleSheet("color: #ff5252; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
+            elif abs_torque > 5.0:
+                self.labels["Torque"].setStyleSheet("color: #ffd740; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
             else:
-                self.labels["Err_M"].setStyleSheet("color: #69f0ae; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
+                self.labels["Torque"].setStyleSheet("color: #b0b0c0; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
         else:
-            self.labels["Err_M"].setText("--")
-            self.labels["Err_M"].setStyleSheet("color: #606070; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
+            self.labels["Torque"].setText("--")
+            self.labels["Torque"].setStyleSheet("color: #606070; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
 
-        # Update robot error with color coding
-        if err_r is not None:
-            self.labels["Err_R"].setText(f"{err_r:.4f}")
-            abs_err = abs(err_r)
-            if abs_err > self.ERROR_THRESHOLD_HIGH:
-                self.labels["Err_R"].setStyleSheet("color: #ff5252; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
-            elif abs_err > self.ERROR_THRESHOLD_WARN:
-                self.labels["Err_R"].setStyleSheet("color: #ffd740; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
-            else:
-                self.labels["Err_R"].setStyleSheet("color: #69f0ae; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
-        else:
-            self.labels["Err_R"].setText("--")
-            self.labels["Err_R"].setStyleSheet("color: #606070; font-family: 'Consolas'; font-size: 12px; padding: 2px;")
 
     def set_selected(self, selected: bool) -> None:
         """Set the card's selected state."""

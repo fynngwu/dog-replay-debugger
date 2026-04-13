@@ -104,17 +104,14 @@ class JointDashboard(QWidget):
 
         mj_pos = snapshot.mujoco_state.positions if snapshot.mujoco_state else [None] * 12
         rb_pos = snapshot.robot_state.positions if snapshot.robot_state else [None] * 12
-        mj_err = snapshot.mujoco_error if snapshot.mujoco_error is not None else [None] * 12
-        rb_err = snapshot.robot_error if snapshot.robot_error is not None else [None] * 12
-
+        rb_torques = snapshot.robot_torques if snapshot.robot_torques is not None else [None] * 12
         for idx, name in enumerate(JOINT_NAMES):
             if name in self._cards:
                 self._cards[name].update_data(
                     target=float(snapshot.current_target[idx]),
                     mujoco=mj_pos[idx] if mj_pos[idx] is not None else None,
                     robot=rb_pos[idx] if rb_pos[idx] is not None else None,
-                    err_m=mj_err[idx] if mj_err[idx] is not None else None,
-                    err_r=rb_err[idx] if rb_err[idx] is not None else None,
+                    torque=rb_torques[idx] if rb_torques[idx] is not None else None,
                 )
 
     def set_selected_joint(self, joint_name: str | None) -> None:
