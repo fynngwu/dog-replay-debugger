@@ -71,6 +71,7 @@ def _mujoco_subprocess(
     imu_np = np.frombuffer(imu_buf, dtype=np.float64)
     p2s = np.array(policy_to_sim)
     s2p = np.array(sim_to_policy)
+    gyro_sensor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "angular-velocity")
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         viewer.cam.distance = 3.0
@@ -94,7 +95,6 @@ def _mujoco_subprocess(
                 state_np[:NUM_JOINTS] = q[s2p] - default_sim[s2p]
                 state_np[NUM_JOINTS:] = dq[s2p]
                 # IMU: gyro from sensor, projected gravity from orientation
-                gyro_sensor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "angular-velocity")
                 if gyro_sensor_id != -1:
                     adr = model.sensor_adr[gyro_sensor_id]
                     imu_np[:3] = data.sensordata[adr:adr + 3]
