@@ -34,7 +34,7 @@ public:
 private:
     DogDriver& driver_;
     std::unique_ptr<InferenceEngine> inference_;
-    std::shared_ptr<IMUComponent> imu_;
+    std::shared_ptr<DriverIMUAdapter> imu_;
     std::shared_ptr<Gamepad> gamepad_;
     std::shared_ptr<JointComponent> joint_comp_;
     std::shared_ptr<ActionComponent> action_comp_;

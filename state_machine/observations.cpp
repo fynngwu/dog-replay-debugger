@@ -97,6 +97,21 @@ std::vector<float> IMUComponent::GetObs() const {
     return obs;
 }
 
+std::vector<float> DriverIMUAdapter::GetObs() const {
+    auto imu = driver_.GetIMUData();
+    std::vector<float> obs;
+    obs.reserve(6);
+    // gyro: DogDriver returns body-frame angular velocity in rad/s
+    obs.push_back(imu.angular_velocity[1]);
+    obs.push_back(-imu.angular_velocity[0]);
+    obs.push_back(imu.angular_velocity[2]);
+    // projected gravity: already a unit vector in body frame
+    obs.push_back(-imu.projected_gravity[1]);
+    obs.push_back(imu.projected_gravity[0]);
+    obs.push_back(-imu.projected_gravity[2]);
+    return obs;
+}
+
 void IMUComponent::AutoScanSensor() {
     int i, iRetry;
     char cBuff[1];

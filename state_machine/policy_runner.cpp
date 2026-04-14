@@ -24,7 +24,7 @@ PolicyRunner::PolicyRunner(DogDriver& driver, const std::string& engine_path)
         return;
     }
 
-    imu_ = std::make_shared<IMUComponent>("/dev/ttyCH341USB0");
+    imu_ = std::make_shared<DriverIMUAdapter>(driver_);
     gamepad_ = std::make_shared<Gamepad>("/dev/input/js0");
     joint_comp_ = std::make_shared<JointComponent>(driver_);
     action_comp_ = std::make_shared<ActionComponent>(ACTION_DIM);
