@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,8 +19,17 @@ from PySide6.QtWidgets import (
 
 from client import SMClient
 from control_panel import ControlPanel
-from status_panel import StatusPanel, load_csv_frames
+from status_panel import StatusPanel
 from styles import STYLE
+
+from replay_core.csv_loader import CsvLoadError, load_replay_csv
+from replay_core.joint_limits import clamp_relative_targets
+from replay_core.sync_bus import SharedStateBus
+from replay_core.types import ReplaySequence
+
+from adapters.mujoco_adapter import MujocoAdapter
+
+MUJOCO_XML_PATH = str(Path(__file__).resolve().parents[2] / "sim_record" / "leggedrobot_flat_fixed.xml")
 
 
 class MainWindow(QMainWindow):
@@ -32,10 +43,12 @@ class MainWindow(QMainWindow):
         self.controls = ControlPanel()
         self.status = StatusPanel()
 
+        self.bus = SharedStateBus()
+        self.mujoco = MujocoAdapter(self.bus)
+
         self._replaying = False
         self._replay_thread: threading.Thread | None = None
-        self._csv_frames: list[list[float]] = []
-        self._start_time: float = 0.0
+        self._sequence: ReplaySequence | None = None
 
         self._setup_ui()
         self._wire_actions()
@@ -78,9 +91,12 @@ class MainWindow(QMainWindow):
         c.csv_browse.clicked.connect(self._browse_csv)
         c.replay_start_btn.clicked.connect(self._start_replay)
         c.replay_stop_btn.clicked.connect(self._stop_replay)
+        c.mujoco_load_btn.clicked.connect(self._load_mujoco)
+        c.mujoco_close_btn.clicked.connect(self._close_mujoco)
 
     def _log(self, msg: str) -> None:
         self.status.append_log(f"[{time.strftime('%H:%M:%S')}] {msg}")
+        self.bus.log(msg)
 
     def _connect(self) -> None:
         host = self.controls.host_input.text().strip() or "127.0.0.1"
@@ -129,27 +145,35 @@ class MainWindow(QMainWindow):
         if path:
             self.controls.csv_path.setText(path)
 
+    def _load_csv(self) -> bool:
+        path = self.controls.csv_path.text().strip()
+        if not path:
+            return False
+        try:
+            sequence = load_replay_csv(path)
+        except CsvLoadError as exc:
+            QMessageBox.warning(self, "CSV error", str(exc))
+            return False
+        self._sequence = sequence
+        self.bus.set_sequence(sequence)
+        self.controls.frame_spin.setMaximum(sequence.total_frames - 1)
+        self.controls.frame_spin.setValue(0)
+        self._log(f"CSV loaded: {sequence.csv_path} ({sequence.total_frames} frames)")
+        return True
+
     def _start_replay(self) -> None:
         path = self.controls.csv_path.text().strip()
         if not path:
             QMessageBox.warning(self, "No CSV", "Please specify a CSV path")
             return
-        ok, msg, frames = load_csv_frames(path)
-        if not ok:
-            QMessageBox.warning(self, "CSV error", msg)
-            return
-        if not frames:
-            QMessageBox.warning(self, "CSV empty", "No valid frames found")
-            return
+        if self._sequence is None:
+            if not self._load_csv():
+                return
 
-        self._csv_frames = frames
-        self.controls.frame_spin.setMaximum(len(frames) - 1)
-        self.controls.frame_spin.setValue(0)
         self._replaying = True
         self.controls.replay_start_btn.setEnabled(False)
         self.controls.replay_stop_btn.setEnabled(True)
-        self._log(f"replay started: {len(frames)} frames")
-        self._start_time = time.monotonic()
+        self._log("replay started")
         self._replay_thread = threading.Thread(target=self._replay_worker, daemon=True)
         self._replay_thread.start()
 
@@ -162,18 +186,55 @@ class MainWindow(QMainWindow):
         self._log("replay stopped")
 
     def _replay_worker(self) -> None:
-        interval = self.controls.interval_spin.value()
-        for i, frame in enumerate(self._csv_frames):
+        assert self._sequence is not None
+        speed = self.controls.speed_spin.value()
+        frames = self._sequence.frames
+        last_wall = time.monotonic()
+        for i, frame in enumerate(frames):
             if not self._replaying:
                 break
-            reply = self.client.send_target(frame)
+            limited = clamp_relative_targets(frame.target_rel, action_scale=1.0)
+            # Drive real robot via TCP
+            reply = self.client.send_target(frame.target_rel.tolist())
             if not reply.get("ok"):
                 self._log(f"replay error frame {i}: {reply.get('msg', '')}")
                 break
-            time.sleep(interval)
+            # Drive MuJoCo via bus
+            self.bus.set_cursor_target(
+                frame.index, frame.target_rel, limited,
+                playing=True, publish_to_robot=False,
+            )
+            # Timing based on frame timestamps
+            if i > 0:
+                dt = frame.time_sec - frames[i - 1].time_sec
+                target_sleep = dt / speed
+                elapsed = time.monotonic() - last_wall
+                if elapsed < target_sleep:
+                    time.sleep(target_sleep - elapsed)
+            last_wall = time.monotonic()
+            with QSignalBlocker(self.controls.frame_spin):
+                self.controls.frame_spin.setValue(frame.index)
+
         self._replaying = False
         self.controls.replay_start_btn.setEnabled(True)
         self.controls.replay_stop_btn.setEnabled(False)
+        self._log("replay finished")
+
+    def _load_mujoco(self) -> None:
+        ok = self.mujoco.load_model(MUJOCO_XML_PATH)
+        if ok:
+            self._log(f"MuJoCo loaded: {MUJOCO_XML_PATH}")
+            self.controls.mujoco_load_btn.setEnabled(False)
+            self.controls.mujoco_close_btn.setEnabled(True)
+        else:
+            self._log("MuJoCo load failed")
+            QMessageBox.warning(self, "MuJoCo", "Failed to load MuJoCo model")
+
+    def _close_mujoco(self) -> None:
+        self.mujoco.close()
+        self._log("MuJoCo closed")
+        self.controls.mujoco_load_btn.setEnabled(True)
+        self.controls.mujoco_close_btn.setEnabled(False)
 
     def _refresh(self) -> None:
         if not self.client.is_connected:
@@ -198,18 +259,15 @@ class MainWindow(QMainWindow):
                 data.get("gyro", [0] * 3), data.get("gravity", [0] * 3)
             )
 
-        if self._replaying:
-            elapsed = time.monotonic() - self._start_time
-            with QSignalBlocker(self.controls.frame_spin):
-                frame_idx = int(
-                    elapsed / max(self.controls.interval_spin.value(), 0.001)
-                )
-                self.controls.frame_spin.setValue(
-                    min(frame_idx, len(self._csv_frames) - 1)
-                )
+        # Sync bus logs to GUI log panel
+        snapshot = self.bus.snapshot()
+        for line in snapshot.log_lines:
+            if not self.status.log_edit.toPlainText().endswith(line):
+                self.status.append_log(line)
 
     def closeEvent(self, event) -> None:
         self._stop_replay()
+        self.mujoco.close()
         self.client.disconnect()
         super().closeEvent(event)
 
