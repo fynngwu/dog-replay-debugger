@@ -30,11 +30,11 @@ PolicyRunner::PolicyRunner(DogDriver& driver, const std::string& engine_path)
         return;
     }
 
-    imu_ = std::make_unique<IMUComponent>("/dev/ttyCH341USB0");
-    gamepad_ = std::make_unique<Gamepad>("/dev/input/js0");
-    joint_comp_ = std::make_unique<JointComponent>(driver_);
-    action_comp_ = std::make_unique<ActionComponent>(ACTION_DIM);
-    command_comp_ = std::make_unique<CommandComponent>(3, gamepad_);
+    imu_ = std::make_shared<IMUComponent>("/dev/ttyCH341USB0");
+    gamepad_ = std::make_shared<Gamepad>("/dev/input/js0");
+    joint_comp_ = std::make_shared<JointComponent>(driver_);
+    action_comp_ = std::make_shared<ActionComponent>(ACTION_DIM);
+    command_comp_ = std::make_shared<CommandComponent>(3, gamepad_);
 
     obs_ = std::make_unique<RoboObs>(HISTORY_LENGTH);
     obs_->AddComponent(imu_);
@@ -53,7 +53,7 @@ bool PolicyRunner::IsReady() const {
 }
 
 void PolicyRunner::Run(std::function<void(const std::array<float, DogDriver::NUM_JOINTS>&)> send_target,
-                        std::function<Mode()> get_current_mode) {
+                        std::function<PolicyMode()> get_current_mode) {
     if (!ready_) {
         std::cerr << "[policy] not ready, skipping" << std::endl;
         return;
@@ -70,7 +70,7 @@ void PolicyRunner::Run(std::function<void(const std::array<float, DogDriver::NUM
         obs_->history.push_back(first_obs);
     }
 
-    while (get_current_mode() == Mode::POLICY) {
+    while (get_current_mode() == PolicyMode::POLICY) {
         obs_->UpdateObs();
         auto obs_vec = obs_->GetWholeObs();
 

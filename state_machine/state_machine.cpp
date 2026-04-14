@@ -150,7 +150,7 @@ void StateMachine::ProcessPolicy() {
                 std::cerr << "[policy] enqueue failed: " << err << std::endl;
             }
         },
-        [this]() { return GetCurrentMode(); }
+        [this]() { return static_cast<PolicyMode>(GetCurrentMode()); }
     );
 #else
     std::cerr << "[state] POLICY: not available (built without TensorRT)" << std::endl;
