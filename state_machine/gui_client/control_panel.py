@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -32,6 +33,8 @@ JOINT_NAMES = [
 
 
 class ControlPanel(QWidget):
+    target_changed = Signal(list)
+
     def __init__(self):
         super().__init__()
         root = QVBoxLayout(self)
@@ -81,20 +84,26 @@ class ControlPanel(QWidget):
         target_layout.setContentsMargins(12, 12, 12, 12)
         target_layout.setSpacing(6)
 
-        self.target_spins: list[QDoubleSpinBox] = []
+        self.target_sliders: list[QSlider] = []
+        self._value_labels: list[QLabel] = []
         for i in range(12):
             row = QHBoxLayout()
             row.setSpacing(6)
             name_label = QLabel(JOINT_NAMES[i])
             name_label.setFixedWidth(72)
-            spin = QDoubleSpinBox()
-            spin.setRange(-3.14159, 3.14159)
-            spin.setDecimals(4)
-            spin.setSingleStep(0.01)
-            spin.setValue(0.0)
-            self.target_spins.append(spin)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(-31416, 31416)
+            slider.setValue(0)
+            val_label = QLabel("0.0000")
+            val_label.setFixedWidth(64)
+            val_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            slider.valueChanged.connect(lambda v, lbl=val_label: lbl.setText(f"{v / 10000.0:.4f}"))
+            slider.valueChanged.connect(lambda: self.target_changed.emit(self.get_target_values()))
+            self.target_sliders.append(slider)
+            self._value_labels.append(val_label)
             row.addWidget(name_label)
-            row.addWidget(spin)
+            row.addWidget(slider)
+            row.addWidget(val_label)
             target_layout.addLayout(row)
 
         self.send_target_btn = QPushButton("Send Target")
@@ -152,3 +161,6 @@ class ControlPanel(QWidget):
         root.addWidget(mujoco_box)
 
         root.addStretch(1)
+
+    def get_target_values(self) -> list[float]:
+        return [s.value() / 10000.0 for s in self.target_sliders]
