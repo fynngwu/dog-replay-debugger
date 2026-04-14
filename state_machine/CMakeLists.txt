@@ -59,7 +59,7 @@ if(TENSORRT_FOUND)
     target_compile_definitions(dog_sm_server PRIVATE HAS_TENSORRT)
 endif()
 
-target_link_libraries(dog_sm_server
+target_link_libraries(dog_sm_server PRIVATE
     Threads::Threads
     dog_driver
 )
