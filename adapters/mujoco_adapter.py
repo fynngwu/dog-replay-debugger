@@ -22,10 +22,30 @@ KD = 0.5
 TAU_LIMIT = np.array([17.0, 17.0, 25.0] * 4, dtype=np.float64)
 
 
+def _quat_wxyz_to_xyzw(quat_wxyz: np.ndarray) -> np.ndarray:
+    """Convert a MuJoCo quaternion from wxyz to xyzw order."""
+    return np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]], dtype=np.float64)
+
+
+def _quat_rotate_inverse_xyzw(quat_xyzw: np.ndarray, vec: np.ndarray) -> np.ndarray:
+    """Rotate a vector by the inverse of a unit quaternion in xyzw order."""
+    x, y, z, w = quat_xyzw
+    rot = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
+    return rot.T @ vec
+
+
 def _mujoco_subprocess(
     xml_path: str,
     target_buf: mp.RawArray,
     state_buf: mp.RawArray,
+    imu_buf: mp.RawArray,
     stop_event: mp.Event,
     policy_to_sim: list[int],
     sim_to_policy: list[int],
@@ -48,6 +68,7 @@ def _mujoco_subprocess(
 
     target_np = np.frombuffer(target_buf, dtype=np.float64)
     state_np = np.frombuffer(state_buf, dtype=np.float64)
+    imu_np = np.frombuffer(imu_buf, dtype=np.float64)
     p2s = np.array(policy_to_sim)
     s2p = np.array(sim_to_policy)
 
@@ -72,6 +93,17 @@ def _mujoco_subprocess(
                 dq = data.qvel[qvel_off:qvel_off + NUM_JOINTS]
                 state_np[:NUM_JOINTS] = q[s2p] - default_sim[s2p]
                 state_np[NUM_JOINTS:] = dq[s2p]
+                # IMU: gyro from sensor, projected gravity from orientation
+                gyro_sensor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "angular-velocity")
+                if gyro_sensor_id != -1:
+                    adr = model.sensor_adr[gyro_sensor_id]
+                    imu_np[:3] = data.sensordata[adr:adr + 3]
+                else:
+                    imu_np[:3] = dq[qvel_off:qvel_off + 3]
+                if has_freejoint:
+                    quat_wxyz = np.array(data.qpos[3:7], dtype=np.float64)
+                    quat_xyzw = _quat_wxyz_to_xyzw(quat_wxyz)
+                    imu_np[3:] = _quat_rotate_inverse_xyzw(quat_xyzw, np.array([0.0, 0.0, -1.0]))
                 last_state_t = now
 
             viewer.sync()
@@ -84,6 +116,7 @@ class MujocoAdapter:
         self.xml_path: Optional[Path] = None
         self._target_buf: Optional[mp.RawArray] = None
         self._state_buf: Optional[mp.RawArray] = None
+        self._imu_buf: Optional[mp.RawArray] = None
         self._stop_event: Optional[mp.Event] = None
         self._process: Optional[mp.Process] = None
         self._bridge_thread: Optional[threading.Thread] = None
@@ -107,6 +140,7 @@ class MujocoAdapter:
 
             self._target_buf = mp.RawArray("d", NUM_JOINTS)
             self._state_buf = mp.RawArray("d", NUM_JOINTS * 2)
+            self._imu_buf = mp.RawArray("d", 6)
             self._stop_event = mp.Event()
 
             self._process = mp.Process(
@@ -115,6 +149,7 @@ class MujocoAdapter:
                     str(resolved),
                     self._target_buf,
                     self._state_buf,
+                    self._imu_buf,
                     self._stop_event,
                     POLICY_TO_SIM.tolist(),
                     SIM_TO_POLICY.tolist(),
@@ -145,6 +180,7 @@ class MujocoAdapter:
         self._bridge_thread = None
         self._target_buf = None
         self._state_buf = None
+        self._imu_buf = None
         self._stop_event = None
         self.bus.set_mujoco_status(False, False)
         self.bus.set_mujoco_apply_hz(0.0)
@@ -167,4 +203,7 @@ class MujocoAdapter:
                     state[NUM_JOINTS:].copy(),
                     time.monotonic(),
                 )
+            if self._imu_buf is not None:
+                imu = np.frombuffer(self._imu_buf, dtype=np.float64)
+                self.bus.update_mujoco_imu(imu[:3].copy(), imu[3:].copy())
             self.bus.set_mujoco_apply_hz(500.0)
