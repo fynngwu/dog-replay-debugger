@@ -43,7 +43,7 @@ class ControlPanel(QWidget):
         conn_layout.setContentsMargins(12, 12, 12, 12)
         conn_layout.setSpacing(8)
 
-        self.host_input = QLineEdit("127.0.0.1")
+        self.host_input = QLineEdit("10.20.127.185")
         self.port_input = QLineEdit("48001")
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setObjectName("connect_btn")
