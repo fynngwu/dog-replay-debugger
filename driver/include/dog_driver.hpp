@@ -30,7 +30,7 @@ class IMUComponent;
 //       LF_HipA(0) LR_HipA(1) RF_HipA(2) RR_HipA(3)
 //       LF_HipF(4) LR_HipF(5) RF_HipF(6) RR_HipF(7)
 //       LF_Knee(8) LR_Knee(9) RF_Knee(10) RR_Knee(11)
-//   - 1 WIT IMU on /dev/ttyUSB0 (gyro + quaternion -> projected gravity)
+//   - 1 WIT IMU on /dev/ttyCH341USB0 (gyro + quaternion -> projected gravity)
 //
 // Initialization (all done in constructor, ~1s):
 //   1. Opens CAN sockets + IMU serial port

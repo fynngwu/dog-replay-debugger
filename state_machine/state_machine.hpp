@@ -25,7 +25,7 @@ public:
     static constexpr float INIT_DURATION_SEC = 2.5f;
     static constexpr int INIT_INTERVAL_MS = 10;
     static constexpr int EXECUTE_INTERVAL_MS = 2;
-    static constexpr float MAX_STEP_RAD = 0.02f;
+    static constexpr float MAX_STEP_RAD = 0.04f;
     static constexpr float REACH_THRESHOLD = 0.001f;
     static constexpr size_t MAX_QUEUE_SIZE = 10;
 

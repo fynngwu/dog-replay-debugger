@@ -13,6 +13,8 @@
 
 namespace dog {
 
+enum class PolicyMode { INIT, EXECUTE, POLICY, STOP };
+
 class PolicyRunner {
 public:
     static constexpr int HISTORY_LENGTH = 10;
@@ -27,16 +29,16 @@ public:
     bool IsReady() const;
 
     void Run(std::function<void(const std::array<float, DogDriver::NUM_JOINTS>&)> send_target,
-             std::function<Mode()> get_current_mode);
+             std::function<PolicyMode()> get_current_mode);
 
 private:
     DogDriver& driver_;
     std::unique_ptr<InferenceEngine> inference_;
-    std::unique_ptr<IMUComponent> imu_;
-    std::unique_ptr<Gamepad> gamepad_;
-    std::unique_ptr<JointComponent> joint_comp_;
-    std::unique_ptr<ActionComponent> action_comp_;
-    std::unique_ptr<CommandComponent> command_comp_;
+    std::shared_ptr<DriverIMUAdapter> imu_;
+    std::shared_ptr<Gamepad> gamepad_;
+    std::shared_ptr<JointComponent> joint_comp_;
+    std::shared_ptr<ActionComponent> action_comp_;
+    std::shared_ptr<CommandComponent> command_comp_;
     std::unique_ptr<RoboObs> obs_;
     bool ready_ = false;
 };

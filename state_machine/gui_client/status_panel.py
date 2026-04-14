@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -111,10 +109,9 @@ class StatusPanel(QWidget):
         self.mode_label.setText(f"Mode: {mode_str}")
 
     def update_joints(self, position: list[float], velocity: list[float]) -> None:
-        for i in range(12):
-            with QSignalBlocker(self.joint_table.item(i, 1)):
+        with QSignalBlocker(self.joint_table):
+            for i in range(12):
                 self.joint_table.item(i, 1).setText(f"{position[i]:.4f}")
-            with QSignalBlocker(self.joint_table.item(i, 2)):
                 self.joint_table.item(i, 2).setText(f"{velocity[i]:.4f}")
 
     def update_imu(self, gyro: list[float], gravity: list[float]) -> None:
@@ -130,23 +127,3 @@ class StatusPanel(QWidget):
         self.log_edit.verticalScrollBar().setValue(
             self.log_edit.verticalScrollBar().maximum()
         )
-
-
-def load_csv_frames(path: str) -> tuple[bool, str, list[list[float]]]:
-    try:
-        with open(path, newline="") as f:
-            reader = csv.reader(f)
-            header = next(reader)
-            frames = []
-            for row in reader:
-                if len(row) < 13:
-                    continue
-                try:
-                    vals = [float(x) for x in row[1:13]]
-                    if len(vals) == 12:
-                        frames.append(vals)
-                except ValueError:
-                    continue
-        return True, f"loaded {len(frames)} frames", frames
-    except Exception as e:
-        return False, str(e), []

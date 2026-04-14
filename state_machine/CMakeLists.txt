@@ -27,6 +27,7 @@ set(SM_SOURCES
     main.cpp
     state_machine.cpp
     tcp_server.cpp
+    protocol.cpp
     observations.cpp
     serial.c
     wit_c_sdk.c
@@ -59,7 +60,7 @@ if(TENSORRT_FOUND)
     target_compile_definitions(dog_sm_server PRIVATE HAS_TENSORRT)
 endif()
 
-target_link_libraries(dog_sm_server
+target_link_libraries(dog_sm_server PRIVATE
     Threads::Threads
     dog_driver
 )
@@ -77,7 +78,7 @@ target_link_libraries(dog_client Threads::Threads)
 target_compile_options(dog_client PRIVATE -Wall -Wextra)
 
 # --- Test CLI tool (links directly to DogDriver, no TCP) ---
-add_executable(sm_test test/sm_test.cpp)
+add_executable(sm_test test/sm_test.cpp observations.cpp)
 target_include_directories(sm_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${DRIVER_DIR}/include

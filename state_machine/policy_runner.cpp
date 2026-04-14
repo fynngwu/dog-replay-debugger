@@ -13,16 +13,10 @@ namespace dog {
 using Clock = std::chrono::steady_clock;
 using Ms = std::chrono::milliseconds;
 
-static std::string GetEnginePath(const std::string& env_var, const std::string& fallback) {
-    const char* env = std::getenv(env_var.c_str());
-    if (env && env[0] != '\0') return std::string(env);
-    return fallback;
-}
-
 PolicyRunner::PolicyRunner(DogDriver& driver, const std::string& engine_path)
     : driver_(driver) {
 
-    std::string path = GetEnginePath(engine_path, "policy.engine");
+    std::string path = engine_path.empty() ? "/home/ares/pure_cpp/policy.engine" : engine_path;
     try {
         inference_ = std::make_unique<InferenceEngine>(path, INPUT_DIM, ACTION_DIM);
     } catch (const std::exception& e) {
@@ -30,11 +24,11 @@ PolicyRunner::PolicyRunner(DogDriver& driver, const std::string& engine_path)
         return;
     }
 
-    imu_ = std::make_unique<IMUComponent>("/dev/ttyCH341USB0");
-    gamepad_ = std::make_unique<Gamepad>("/dev/input/js0");
-    joint_comp_ = std::make_unique<JointComponent>(driver_);
-    action_comp_ = std::make_unique<ActionComponent>(ACTION_DIM);
-    command_comp_ = std::make_unique<CommandComponent>(3, gamepad_);
+    imu_ = std::make_shared<DriverIMUAdapter>(driver_);
+    gamepad_ = std::make_shared<Gamepad>("/dev/input/js0");
+    joint_comp_ = std::make_shared<JointComponent>(driver_);
+    action_comp_ = std::make_shared<ActionComponent>(ACTION_DIM);
+    command_comp_ = std::make_shared<CommandComponent>(3, gamepad_);
 
     obs_ = std::make_unique<RoboObs>(HISTORY_LENGTH);
     obs_->AddComponent(imu_);
@@ -53,7 +47,7 @@ bool PolicyRunner::IsReady() const {
 }
 
 void PolicyRunner::Run(std::function<void(const std::array<float, DogDriver::NUM_JOINTS>&)> send_target,
-                        std::function<Mode()> get_current_mode) {
+                        std::function<PolicyMode()> get_current_mode) {
     if (!ready_) {
         std::cerr << "[policy] not ready, skipping" << std::endl;
         return;
@@ -70,7 +64,7 @@ void PolicyRunner::Run(std::function<void(const std::array<float, DogDriver::NUM
         obs_->history.push_back(first_obs);
     }
 
-    while (get_current_mode() == Mode::POLICY) {
+    while (get_current_mode() == PolicyMode::POLICY) {
         obs_->UpdateObs();
         auto obs_vec = obs_->GetWholeObs();
 

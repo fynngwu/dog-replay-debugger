@@ -97,6 +97,19 @@ std::vector<float> IMUComponent::GetObs() const {
     return obs;
 }
 
+std::vector<float> DriverIMUAdapter::GetObs() const {
+    auto imu = driver_.GetIMUData();
+    std::vector<float> obs;
+    obs.reserve(6);
+    // DogDriver::GetIMUData() already applies the same axis reordering
+    // as IMUComponent::GetObs(), so just pass through directly.
+    for (int i = 0; i < 3; ++i)
+        obs.push_back(imu.angular_velocity[i]);
+    for (int i = 0; i < 3; ++i)
+        obs.push_back(imu.projected_gravity[i]);
+    return obs;
+}
+
 void IMUComponent::AutoScanSensor() {
     int i, iRetry;
     char cBuff[1];
@@ -180,16 +193,8 @@ std::vector<float> JointComponent::GetObs() const {
     std::vector<float> obs(DogDriver::NUM_JOINTS * 2);
 
     for (int i = 0; i < DogDriver::NUM_JOINTS; ++i) {
-        float pos = js.position[i];
-        float vel = js.velocity[i];
-
-        if (i >= 8 && i <= 11) {
-            obs[i] = pos / DogDriver::KNEE_GEAR_RATIO;
-            obs[DogDriver::NUM_JOINTS + i] = vel / DogDriver::KNEE_GEAR_RATIO;
-        } else {
-            obs[i] = pos;
-            obs[DogDriver::NUM_JOINTS + i] = vel;
-        }
+        obs[i] = js.position[i];
+        obs[DogDriver::NUM_JOINTS + i] = js.velocity[i];
     }
     return obs;
 }

@@ -10,45 +10,13 @@
 #include <cstring>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <vector>
 
+#include "protocol.hpp"
 #include "state_machine.hpp"
 
 namespace dog {
-
-static std::string Trim(const std::string& s) {
-    size_t b = 0;
-    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
-    size_t e = s.size();
-    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
-    return s.substr(b, e - b);
-}
-
-static std::vector<std::string> SplitWS(const std::string& s) {
-    std::stringstream ss(s);
-    std::vector<std::string> out;
-    std::string token;
-    while (ss >> token) out.push_back(token);
-    return out;
-}
-
-static std::string OkReply(const std::string& msg) {
-    std::ostringstream oss;
-    oss << "{\"ok\":true,\"msg\":\"" << msg << "\"}\n";
-    return oss.str();
-}
-
-static std::string OkData(const std::string& data) {
-    std::ostringstream oss;
-    oss << "{\"ok\":true,\"data\":" << data << "}\n";
-    return oss.str();
-}
-
-static std::string ErrorReply(const std::string& msg) {
-    std::ostringstream oss;
-    oss << "{\"ok\":false,\"msg\":\"" << msg << "\"}\n";
-    return oss.str();
-}
 
 TcpServer::TcpServer(StateMachine& sm, int port) : sm_(sm), port_(port) {}
 
@@ -128,6 +96,18 @@ void TcpServer::AcceptLoop() {
     }
 }
 
+namespace {
+
+std::string Trim(const std::string& s) {
+    size_t b = 0;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+    size_t e = s.size();
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+    return s.substr(b, e - b);
+}
+
+}  // namespace
+
 void TcpServer::HandleClient(int client_fd) {
     char buf[4096];
     std::string buffer;
@@ -148,94 +128,68 @@ void TcpServer::HandleClient(int client_fd) {
 }
 
 std::string TcpServer::ProcessCommand(const std::string& line) {
-    const std::vector<std::string> tokens = SplitWS(line);
-    if (tokens.empty()) return ErrorReply("empty command");
+    const auto cmd = ParseCommand(line);
+    switch (cmd.type) {
+        case Command::RequestMode: {
+            if (cmd.args.size() != 1)
+                return MakeErrorReply("usage: request_mode <init|execute|policy|stop>");
+            Mode mode;
+            const std::string& m = cmd.args[0];
+            if (m == "init")          mode = Mode::INIT;
+            else if (m == "execute")  mode = Mode::EXECUTE;
+            else if (m == "policy")   mode = Mode::POLICY;
+            else if (m == "stop")     mode = Mode::STOP;
+            else return MakeErrorReply("unknown mode: " + m + ", use init/execute/policy/stop");
 
-    const std::string& op = tokens[0];
-
-    if (op == "request_mode") {
-        if (tokens.size() != 2) return ErrorReply("usage: request_mode <init|execute|policy|stop>");
-        Mode mode;
-        const std::string& m = tokens[1];
-        if (m == "init") mode = Mode::INIT;
-        else if (m == "execute") mode = Mode::EXECUTE;
-        else if (m == "policy") mode = Mode::POLICY;
-        else if (m == "stop") mode = Mode::STOP;
-        else return ErrorReply("unknown mode: " + m + ", use init/execute/policy/stop");
-
-        std::string err = sm_.RequestMode(mode);
-        if (!err.empty()) return ErrorReply(err);
-        return OkReply("mode set to " + m);
-    }
-
-    if (op == "target") {
-        if (tokens.size() != 1 + StateMachine::NUM_JOINTS) {
-            return ErrorReply("target requires " +
-                              std::to_string(StateMachine::NUM_JOINTS) + " float values");
+            std::string err = sm_.RequestMode(mode);
+            if (!err.empty()) return MakeErrorReply(err);
+            return MakeOkReply("mode set to " + m);
         }
-        std::array<float, StateMachine::NUM_JOINTS> joints;
-        try {
-            for (int i = 0; i < StateMachine::NUM_JOINTS; ++i) {
-                joints[i] = std::stof(tokens[1 + i]);
+        case Command::Target: {
+            if (static_cast<int>(cmd.args.size()) != StateMachine::NUM_JOINTS) {
+                return MakeErrorReply("target requires " +
+                    std::to_string(StateMachine::NUM_JOINTS) + " float values");
             }
-        } catch (const std::exception& e) {
-            return ErrorReply(std::string("float parse failed: ") + e.what());
+            std::array<float, StateMachine::NUM_JOINTS> joints;
+            try {
+                for (int i = 0; i < StateMachine::NUM_JOINTS; ++i)
+                    joints[i] = std::stof(cmd.args[i]);
+            } catch (const std::exception& e) {
+                return MakeErrorReply(std::string("float parse failed: ") + e.what());
+            }
+
+            std::string err = sm_.RequestMode(Mode::EXECUTE);
+            if (!err.empty()) return MakeErrorReply(err);
+
+            err = sm_.EnqueueTarget(joints);
+            if (!err.empty()) return MakeErrorReply(err);
+            return MakeOkReply("target queued");
         }
-
-        std::string err = sm_.RequestMode(Mode::EXECUTE);
-        if (!err.empty()) return ErrorReply(err);
-
-        err = sm_.EnqueueTarget(joints);
-        if (!err.empty()) return ErrorReply(err);
-        return OkReply("target queued");
+        case Command::GetMode: {
+            std::string mode_str;
+            switch (sm_.GetCurrentMode()) {
+                case Mode::INIT:    mode_str = "INIT"; break;
+                case Mode::EXECUTE: mode_str = "EXECUTE"; break;
+                case Mode::POLICY:  mode_str = "POLICY"; break;
+                case Mode::STOP:    mode_str = "STOP"; break;
+            }
+            return MakeOkReply("current mode: " + mode_str);
+        }
+        case Command::GetJoints: {
+            auto js = sm_.GetJointStates();
+            return MakeOkData(SerializeJoints(js.position.data(), js.velocity.data(),
+                                              StateMachine::NUM_JOINTS));
+        }
+        case Command::GetImu: {
+            auto imu = sm_.GetIMUData();
+            return MakeOkData(SerializeIMU(imu.angular_velocity.data(),
+                                             imu.projected_gravity.data()));
+        }
+        case Command::Unknown:
+            return MakeErrorReply("unknown command, use request_mode/target/get_mode/get_joints/get_imu");
+            break;
     }
-
-    if (op == "get_mode") {
-        std::string mode_str;
-        switch (sm_.GetCurrentMode()) {
-            case Mode::INIT: mode_str = "INIT"; break;
-            case Mode::EXECUTE: mode_str = "EXECUTE"; break;
-            case Mode::POLICY: mode_str = "POLICY"; break;
-            case Mode::STOP: mode_str = "STOP"; break;
-        }
-        return OkReply("current mode: " + mode_str);
-    }
-
-    if (op == "get_joints") {
-        auto js = sm_.GetJointStates();
-        std::ostringstream oss;
-        oss << "{\"position\":[";
-        for (int i = 0; i < StateMachine::NUM_JOINTS; ++i) {
-            if (i > 0) oss << ",";
-            oss << js.position[i];
-        }
-        oss << "],\"velocity\":[";
-        for (int i = 0; i < StateMachine::NUM_JOINTS; ++i) {
-            if (i > 0) oss << ",";
-            oss << js.velocity[i];
-        }
-        oss << "]}";
-        return OkData(oss.str());
-    }
-
-    if (op == "get_imu") {
-        auto imu = sm_.GetIMUData();
-        std::ostringstream oss;
-        oss << "{\"gyro\":[";
-        for (int i = 0; i < 3; ++i) {
-            if (i > 0) oss << ",";
-            oss << imu.angular_velocity[i];
-        }
-        oss << "],\"gravity\":[";
-        for (int i = 0; i < 3; ++i) {
-            if (i > 0) oss << ",";
-            oss << imu.projected_gravity[i];
-        }
-        oss << "]}";
-        return OkData(oss.str());
-    }
-
-    return ErrorReply("unknown command: " + op + ", use request_mode/target/get_mode/get_joints/get_imu");
+    return MakeErrorReply("internal error");
 }
 
 }  // namespace dog

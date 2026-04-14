@@ -65,6 +65,18 @@ public:
     std::vector<float> GetSingleObs() const;
 };
 
+// Lightweight adapter that reads IMU from DogDriver without opening serial port.
+// Use this instead of IMUComponent when DogDriver already owns the IMU.
+class DriverIMUAdapter : public ObsComponent {
+public:
+    explicit DriverIMUAdapter(DogDriver& driver) : driver_(driver) {}
+    ~DriverIMUAdapter() = default;
+    std::vector<float> GetObs() const override;
+    void Update() override {}
+private:
+    DogDriver& driver_;
+};
+
 class IMUComponent : public ObsComponent {
 public:
     IMUComponent(const char* dev);

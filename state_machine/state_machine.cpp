@@ -14,9 +14,7 @@ using Ms = std::chrono::milliseconds;
 
 StateMachine::StateMachine(DogDriver& driver) : driver_(driver) {
 #ifdef HAS_TENSORRT
-    const char* engine_env = std::getenv("DOG_POLICY_ENGINE");
-    std::string engine_path = engine_env ? engine_env : "";
-    policy_runner_ = std::make_unique<PolicyRunner>(driver_, engine_path);
+    policy_runner_ = std::make_unique<PolicyRunner>(driver_, "");
 #endif
 }
 
@@ -150,7 +148,7 @@ void StateMachine::ProcessPolicy() {
                 std::cerr << "[policy] enqueue failed: " << err << std::endl;
             }
         },
-        [this]() { return GetCurrentMode(); }
+        [this]() { return static_cast<PolicyMode>(GetCurrentMode()); }
     );
 #else
     std::cerr << "[state] POLICY: not available (built without TensorRT)" << std::endl;
@@ -166,7 +164,6 @@ void StateMachine::ProcessStop() {
 
 void StateMachine::ExecuteThreadFunc() {
     auto last_sent = driver_.GetJointStates().position;
-    auto next = Clock::now() + Ms(EXECUTE_INTERVAL_MS);
 
     while (running_) {
         std::array<float, NUM_JOINTS> target;
@@ -191,8 +188,7 @@ void StateMachine::ExecuteThreadFunc() {
             driver_.SetAllJointPositions(cmd);
             last_sent = cmd;
             if (reached) break;
-            std::this_thread::sleep_until(next);
-            next += Ms(EXECUTE_INTERVAL_MS);
+            std::this_thread::sleep_for(Ms(EXECUTE_INTERVAL_MS));
         }
     }
 
