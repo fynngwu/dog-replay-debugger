@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._refresh)
-        self.refresh_timer.start(100)
+        self.refresh_timer.start(20)
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         c.replay_stop_btn.clicked.connect(self._stop_replay)
         c.mujoco_load_btn.clicked.connect(self._load_mujoco)
         c.mujoco_close_btn.clicked.connect(self._close_mujoco)
+        self.controls.target_changed.connect(self._on_target_changed)
 
     def _log(self, msg: str) -> None:
         self.status.append_log(f"[{time.strftime('%H:%M:%S')}] {msg}")
@@ -140,7 +141,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Mode error", reply.get("msg", "unknown error"))
 
     def _send_target(self) -> None:
-        joints = [spin.value() for spin in self.controls.target_spins]
+        joints = self.controls.get_target_values()
         self._log("sending target...")
         reply = self.client.send_target(joints)
         if reply.get("ok"):
@@ -245,6 +246,14 @@ class MainWindow(QMainWindow):
         self.controls.mujoco_load_btn.setEnabled(True)
         self.controls.mujoco_close_btn.setEnabled(False)
 
+    def _on_target_changed(self, target: list[float]) -> None:
+        snapshot = self.bus.snapshot()
+        mujoco_pos = snapshot.mujoco_state.positions.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+        mujoco_vel = snapshot.mujoco_state.velocities.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+        robot_pos = [0.0] * 12
+        robot_vel = [0.0] * 12
+        self.status.update_joints(target, robot_pos, robot_vel, mujoco_pos, mujoco_vel)
+
     def _refresh(self) -> None:
         # Sync bus logs to GUI log panel (always, even during replay)
         snapshot = self.bus.snapshot()
@@ -271,24 +280,27 @@ class MainWindow(QMainWindow):
         if not self.client.is_connected:
             return
 
-        mode_reply = self.client.get_mode()
-        if mode_reply.get("ok"):
-            mode_str = mode_reply.get("msg", "").replace("current mode: ", "")
-            self.status.update_mode(mode_str)
+        reply = self.client.get_all()
+        if not reply.get("ok"):
+            return
 
-        joints_reply = self.client.get_joints()
-        if joints_reply.get("ok"):
-            data = joints_reply.get("data", {})
-            self.status.update_joints(
-                data.get("position", [0] * 12), data.get("velocity", [0] * 12)
-            )
+        data = reply["data"]
+        self.status.update_mode(data.get("mode", "---"))
 
-        imu_reply = self.client.get_imu()
-        if imu_reply.get("ok"):
-            data = imu_reply.get("data", {})
-            self.status.update_imu(
-                data.get("gyro", [0] * 3), data.get("gravity", [0] * 3)
-            )
+        robot_pos = [j["position"] for j in data.get("joints", [])] or [0.0] * 12
+        robot_vel = [j["velocity"] for j in data.get("joints", [])] or [0.0] * 12
+        imu_data = data.get("imu", {})
+        robot_gyro = [imu_data.get("gyro_x", 0.0), imu_data.get("gyro_y", 0.0), imu_data.get("gyro_z", 0.0)]
+        robot_gravity = [imu_data.get("grav_x", 0.0), imu_data.get("grav_y", 0.0), imu_data.get("grav_z", 0.0)]
+
+        target = snapshot.current_target.tolist()
+        mujoco_pos = snapshot.mujoco_state.positions.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+        mujoco_vel = snapshot.mujoco_state.velocities.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+        mujoco_gyro = snapshot.mujoco_imu[:3].tolist() if snapshot.mujoco_imu is not None else [0.0, 0.0, 0.0]
+        mujoco_gravity = snapshot.mujoco_imu[3:].tolist() if snapshot.mujoco_imu is not None else [0.0, 0.0, 0.0]
+
+        self.status.update_joints(target, robot_pos, robot_vel, mujoco_pos, mujoco_vel)
+        self.status.update_imu(robot_gyro, robot_gravity, mujoco_gyro, mujoco_gravity)
 
     def closeEvent(self, event) -> None:
         self._stop_replay()
