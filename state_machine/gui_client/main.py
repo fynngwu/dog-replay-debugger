@@ -49,6 +49,7 @@ class MainWindow(QMainWindow):
         self._replaying = False
         self._replay_thread: threading.Thread | None = None
         self._sequence: ReplaySequence | None = None
+        self._current_frame: int = 0
 
         self._setup_ui()
         self._wire_actions()
@@ -212,8 +213,7 @@ class MainWindow(QMainWindow):
                 if elapsed < target_sleep:
                     time.sleep(target_sleep - elapsed)
             last_wall = time.monotonic()
-            with QSignalBlocker(self.controls.frame_spin):
-                self.controls.frame_spin.setValue(frame.index)
+            self._current_frame = frame.index
 
         self._replaying = False
         self.controls.replay_start_btn.setEnabled(True)
@@ -264,6 +264,11 @@ class MainWindow(QMainWindow):
         for line in snapshot.log_lines:
             if not self.status.log_edit.toPlainText().endswith(line):
                 self.status.append_log(line)
+
+        # Update frame spin from worker thread state (main-thread-safe)
+        if self._replaying:
+            with QSignalBlocker(self.controls.frame_spin):
+                self.controls.frame_spin.setValue(self._current_frame)
 
     def closeEvent(self, event) -> None:
         self._stop_replay()
