@@ -20,6 +20,8 @@ static const char kUsage[] =
 R"(Usage: sm_test <command> [args...]
 
 Commands:
+  init                Enable motors + auto-report + interpolate to zero (2.5s)
+  autoreport          Enable auto-report on all joints
   joints              Read all joint positions/velocities once
   joints --stream     Stream joints at ~10 Hz (Ctrl+C to stop)
   imu                 Read IMU data once
@@ -147,6 +149,69 @@ static int cmd_set_joint(DogDriver& driver, int idx, float rad) {
     return ret;
 }
 
+static int cmd_autoreport(DogDriver& driver) {
+    printf("Enabling auto-report on all joints...\n");
+    int errors = 0;
+    for (int i = 0; i < DogDriver::NUM_JOINTS; i++) {
+        int ret = driver.EnableAutoReport(i);
+        if (ret != 0) {
+            printf("  [%2d] %-6s  FAILED (ret=%d)\n", i, kJointNames[i], ret);
+            errors++;
+        }
+    }
+    if (errors == 0) {
+        printf("OK: auto-report enabled on all %d joints.\n", DogDriver::NUM_JOINTS);
+    }
+    return errors;
+}
+
+// Same logic as StateMachine::ProcessInit
+static int cmd_init(DogDriver& driver) {
+    constexpr float kDurationSec = 2.5f;
+    constexpr int kIntervalMs = 10;
+
+    printf("[init] enabling motors...\n");
+    int ret = driver.EnableAll();
+    if (ret != 0) {
+        printf("[init] ERROR: EnableAll returned %d\n", ret);
+        return 1;
+    }
+
+    printf("[init] enabling auto-report on all joints...\n");
+    for (int i = 0; i < DogDriver::NUM_JOINTS; i++) {
+        driver.EnableAutoReport(i);
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    auto current = driver.GetJointStates().position;
+    printf("[init] current positions:");
+    for (int i = 0; i < DogDriver::NUM_JOINTS; i++) {
+        printf(" %.3f", current[i]);
+    }
+    printf("\n");
+
+    printf("[init] interpolating to zero over %.1fs...\n", kDurationSec);
+
+    const int num_steps = static_cast<int>(kDurationSec * 1000 / kIntervalMs);
+    auto next = std::chrono::steady_clock::now() + std::chrono::milliseconds(kIntervalMs);
+
+    for (int step = 1; step <= num_steps; ++step) {
+        float t = static_cast<float>(step) / num_steps;
+        std::array<float, DogDriver::NUM_JOINTS> target;
+        for (int i = 0; i < DogDriver::NUM_JOINTS; ++i) {
+            target[i] = current[i] * (1.0f - t);
+        }
+        driver.SetAllJointPositions(target);
+        std::this_thread::sleep_until(next);
+        next += std::chrono::milliseconds(kIntervalMs);
+    }
+
+    driver.SetAllJointPositions(std::array<float, DogDriver::NUM_JOINTS>{});
+    printf("[init] complete, all joints at zero.\n");
+    return 0;
+}
+
 static int cmd_online(DogDriver& driver) {
     printf("Motor online status:\n");
     for (int i = 0; i < DogDriver::NUM_JOINTS; i++) {
@@ -203,6 +268,12 @@ int main(int argc, char* argv[]) {
     if (cmd == "imu") {
         bool stream = (argc >= 3 && std::strcmp(argv[2], "--stream") == 0);
         return cmd_imu(driver, stream);
+    }
+    if (cmd == "autoreport") {
+        return cmd_autoreport(driver);
+    }
+    if (cmd == "init") {
+        return cmd_init(driver);
     }
     if (cmd == "set_joint") {
         if (argc < 4) {
