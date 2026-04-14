@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sys
-import threading
-import time
 from pathlib import Path
 
-import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import threading
+import time
+
 from PySide6.QtCore import QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -52,6 +54,7 @@ class MainWindow(QMainWindow):
         self.mujoco = MujocoAdapter(self.bus)
 
         self._replaying = False
+        self._replay_error: str | None = None
         self._replay_thread: threading.Thread | None = None
         self._sequence: ReplaySequence | None = None
         self._current_frame: int = 0
@@ -177,54 +180,54 @@ class MainWindow(QMainWindow):
             if not self._load_csv():
                 return
 
+        self._log(f"starting replay: {self._sequence.total_frames} frames, speed={self.controls.speed_spin.value()}x")
         self._replaying = True
+        self._replay_error = None
+        self._current_frame = 0
+        speed = self.controls.speed_spin.value()
         self.controls.replay_start_btn.setEnabled(False)
         self.controls.replay_stop_btn.setEnabled(True)
-        self._log("replay started")
-        self._replay_thread = threading.Thread(target=self._replay_worker, daemon=True)
-        self._replay_thread.start()
+        t = threading.Thread(target=self._replay_worker, args=(speed,), daemon=True)
+        t.start()
+        self._replay_thread = t
 
     def _stop_replay(self) -> None:
         if not self._replaying:
             return
         self._replaying = False
-        self.controls.replay_start_btn.setEnabled(True)
-        self.controls.replay_stop_btn.setEnabled(False)
-        self._log("replay stopped")
 
-    def _replay_worker(self) -> None:
-        assert self._sequence is not None
-        speed = self.controls.speed_spin.value()
-        frames = self._sequence.frames
-        last_wall = time.monotonic()
-        for i, frame in enumerate(frames):
-            if not self._replaying:
-                break
-            limited = clamp_relative_targets(frame.target_rel, action_scale=1.0)
-            # Drive real robot via TCP
-            reply = self.client.send_target(frame.target_rel.tolist())
-            if not reply.get("ok"):
-                self._log(f"replay error frame {i}: {reply.get('msg', '')}")
-                break
-            # Drive MuJoCo via bus
-            self.bus.set_cursor_target(
-                frame.index, frame.target_rel, limited,
-                playing=True, publish_to_robot=False,
-            )
-            # Timing based on frame timestamps
-            if i > 0:
-                dt = frame.time_sec - frames[i - 1].time_sec
-                target_sleep = dt / speed
-                elapsed = time.monotonic() - last_wall
-                if elapsed < target_sleep:
-                    time.sleep(target_sleep - elapsed)
+    def _replay_worker(self, speed: float) -> None:
+        """Run in background thread. Must NOT touch any Qt widget."""
+        try:
+            frames = self._sequence.frames
             last_wall = time.monotonic()
-            self._current_frame = frame.index
-
-        self._replaying = False
-        self.controls.replay_start_btn.setEnabled(True)
-        self.controls.replay_stop_btn.setEnabled(False)
-        self._log("replay finished")
+            for i, frame in enumerate(frames):
+                if not self._replaying:
+                    break
+                # Send target joints via TCP (non-fatal if not connected)
+                reply = self.client.send_target(frame.target_rel.tolist())
+                if not reply.get("ok") and self.client.is_connected:
+                    # TCP error while connected — real problem
+                    self._replay_error = reply.get("msg", "unknown")
+                    self._current_frame = i
+                    break
+                # Push to bus for MuJoCo viewer
+                self.bus.set_cursor_target(
+                    frame.index, frame.target_rel, frame.target_rel,
+                    playing=True, publish_to_robot=False,
+                )
+                self._current_frame = frame.index
+                # Pace playback using CSV timestamps
+                if i > 0:
+                    dt = frame.time_sec - frames[i - 1].time_sec
+                    elapsed = time.monotonic() - last_wall
+                    if elapsed < dt / speed:
+                        time.sleep(dt / speed - elapsed)
+                last_wall = time.monotonic()
+        except Exception as e:
+            self._replay_error = f"worker exception: {e}"
+        finally:
+            self._replaying = False
 
     def _load_mujoco(self) -> None:
         ok = self.mujoco.load_model(MUJOCO_XML_PATH)
@@ -243,6 +246,28 @@ class MainWindow(QMainWindow):
         self.controls.mujoco_close_btn.setEnabled(False)
 
     def _refresh(self) -> None:
+        # Sync bus logs to GUI log panel (always, even during replay)
+        snapshot = self.bus.snapshot()
+        for line in snapshot.log_lines:
+            if not self.status.log_edit.toPlainText().endswith(line):
+                self.status.append_log(line)
+
+        # Detect replay thread death (must check BEFORE the replaying guard)
+        if self._replay_thread is not None and not self._replay_thread.is_alive():
+            if self._replay_error:
+                self._log(f"replay error: {self._replay_error}")
+            else:
+                self._log("replay finished")
+            self.controls.replay_start_btn.setEnabled(True)
+            self.controls.replay_stop_btn.setEnabled(False)
+            self._replay_thread = None
+
+        # Update frame spin from worker thread state (main-thread-safe)
+        if self._replaying:
+            with QSignalBlocker(self.controls.frame_spin):
+                self.controls.frame_spin.setValue(self._current_frame)
+            return  # skip TCP polling during replay — worker thread owns the socket
+
         if not self.client.is_connected:
             return
 
@@ -264,17 +289,6 @@ class MainWindow(QMainWindow):
             self.status.update_imu(
                 data.get("gyro", [0] * 3), data.get("gravity", [0] * 3)
             )
-
-        # Sync bus logs to GUI log panel
-        snapshot = self.bus.snapshot()
-        for line in snapshot.log_lines:
-            if not self.status.log_edit.toPlainText().endswith(line):
-                self.status.append_log(line)
-
-        # Update frame spin from worker thread state (main-thread-safe)
-        if self._replaying:
-            with QSignalBlocker(self.controls.frame_spin):
-                self.controls.frame_spin.setValue(self._current_frame)
 
     def closeEvent(self, event) -> None:
         self._stop_replay()

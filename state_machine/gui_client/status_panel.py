@@ -109,10 +109,9 @@ class StatusPanel(QWidget):
         self.mode_label.setText(f"Mode: {mode_str}")
 
     def update_joints(self, position: list[float], velocity: list[float]) -> None:
-        for i in range(12):
-            with QSignalBlocker(self.joint_table.item(i, 1)):
+        with QSignalBlocker(self.joint_table):
+            for i in range(12):
                 self.joint_table.item(i, 1).setText(f"{position[i]:.4f}")
-            with QSignalBlocker(self.joint_table.item(i, 2)):
                 self.joint_table.item(i, 2).setText(f"{velocity[i]:.4f}")
 
     def update_imu(self, gyro: list[float], gravity: list[float]) -> None:
