@@ -182,10 +182,12 @@ std::string TcpServer::ProcessCommand(const std::string& line) {
         }
         case Command::GetImu: {
             auto imu = sm_.GetIMUData();
-            return MakeOkData(SerializeIMU(imu.angular_velocity, imu.projected_gravity));
+            return MakeOkData(SerializeIMU(imu.angular_velocity.data(),
+                                             imu.projected_gravity.data()));
         }
         case Command::Unknown:
             return MakeErrorReply("unknown command, use request_mode/target/get_mode/get_joints/get_imu");
+            break;
     }
     return MakeErrorReply("internal error");
 }
