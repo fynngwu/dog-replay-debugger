@@ -82,4 +82,57 @@ adapters/                       # robot and MuJoCo adapters
 cli/                            # CLI session helpers
 gui/                            # Qt widgets and plotting
 examples/sample_replay.csv      # tiny local test trajectory
+driver/                         # DogDriver shared library (CAN motor + WIT IMU)
+state_machine/                  # StateMachine + TCP server + Python GUI client
+state_machine/test/sm_test.cpp  # Hardware test CLI (links DogDriver directly)
 ```
+
+## State Machine Module
+
+C++ state machine that manages robot modes (INIT / EXECUTE / POLICY / STOP) and exposes a TCP server for remote control.
+
+### Hardware test tool (`sm_test`)
+
+CLI tool for direct hardware testing without TCP. Links `DogDriver` directly.
+
+```bash
+# Build (from project root)
+mkdir -p build && cd build && cmake ../state_machine && make sm_test -j$(nproc)
+
+# Or standalone
+./state_machine/test/build.sh
+```
+
+```text
+Usage: sm_test <command> [args...]
+
+Commands:
+  init                Enable motors + auto-report + interpolate to zero (2.5s)
+  autoreport          Enable auto-report on all joints
+  joints              Read all joint positions/velocities once
+  joints --stream     Stream joints at ~10 Hz (Ctrl+C to stop)
+  imu                 Read IMU data once
+  imu --stream        Stream IMU data at ~10 Hz (Ctrl+C to stop)
+  set_joint <idx> <rad>  Set single joint position
+  enable              Enable all motors
+  disable             Disable all motors
+  online              Check which motors are online
+  info                Print driver info (IMU status, motor status)
+```
+
+### Test checklist
+
+| Test | Command | Status |
+|------|---------|--------|
+| Motor CAN connectivity | `sm_test online` | Passed (12/12) |
+| IMU serial connectivity | `sm_test info` | Passed (CH340 @ 115200 baud) |
+| Joint position read | `sm_test joints` | Passed |
+| Joint velocity read | `sm_test joints` | Passed |
+| IMU gyro read | `sm_test imu` | Passed |
+| IMU gravity read | `sm_test imu` | Passed |
+| Joint real-time stream | `sm_test joints --stream` | Passed |
+| IMU real-time stream | `sm_test imu --stream` | Passed |
+| Motor enable/disable | `sm_test enable` / `sm_test disable` | Passed |
+| Init sequence (home) | `sm_test init` | Passed |
+| Single joint control | `sm_test set_joint 0 0.3` | Passed |
+| Auto-report enable | `sm_test autoreport` | Passed |
