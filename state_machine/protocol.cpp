@@ -1,5 +1,4 @@
 #include "protocol.hpp"
-#include "state_machine.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -117,7 +116,7 @@ std::string SerializeIMU(const float* gyro, const float* gravity) {
     return oss.str();
 }
 
-static std::string ModeToString(Mode mode) {
+std::string ModeToString(Mode mode) {
     switch (mode) {
         case Mode::INIT:    return "INIT";
         case Mode::EXECUTE: return "EXECUTE";
