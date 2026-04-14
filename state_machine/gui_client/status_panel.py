@@ -4,6 +4,7 @@ from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QGroupBox,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QSplitter,
@@ -47,14 +48,15 @@ class StatusPanel(QWidget):
         joint_layout.setContentsMargins(12, 12, 12, 12)
         joint_layout.setSpacing(4)
 
-        self.joint_table = QTableWidget(12, 4)
+        self.joint_table = QTableWidget(12, 7)
         self.joint_table.setHorizontalHeaderLabels(
-            ["Joint", "Position (rad)", "Velocity (rad/s)", ""]
+            ["Joint", "Target (rad)", "Robot Pos (rad)", "Mujoco Pos (rad)",
+             "Robot Vel (rad/s)", "Mujoco Vel (rad/s)", ""]
         )
         self.joint_table.horizontalHeader().setStretchLastSection(True)
-        self.joint_table.setColumnWidth(0, 80)
-        self.joint_table.setColumnWidth(1, 120)
-        self.joint_table.setColumnWidth(2, 120)
+        self.joint_table.setColumnWidth(0, 72)
+        for col in range(1, 6):
+            self.joint_table.setColumnWidth(col, 100)
         self.joint_table.verticalHeader().setVisible(False)
         self.joint_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.joint_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -63,14 +65,17 @@ class StatusPanel(QWidget):
             self.joint_table.setItem(i, 0, QTableWidgetItem(name))
             self.joint_table.setItem(i, 1, QTableWidgetItem("0.0000"))
             self.joint_table.setItem(i, 2, QTableWidgetItem("0.0000"))
+            self.joint_table.setItem(i, 3, QTableWidgetItem("0.0000"))
+            self.joint_table.setItem(i, 4, QTableWidgetItem("0.0000"))
+            self.joint_table.setItem(i, 5, QTableWidgetItem("0.0000"))
 
         joint_layout.addWidget(self.joint_table)
         splitter.addWidget(joint_box)
 
-        imu_box = QGroupBox("IMU")
-        imu_layout = QGridLayout(imu_box)
-        imu_layout.setContentsMargins(12, 12, 12, 12)
-        imu_layout.setSpacing(6)
+        imu_container = QWidget()
+        imu_h_layout = QHBoxLayout(imu_container)
+        imu_h_layout.setContentsMargins(0, 0, 0, 0)
+        imu_h_layout.setSpacing(8)
 
         self.imu_labels: dict[str, QLabel] = {}
         imu_fields = [
@@ -81,16 +86,22 @@ class StatusPanel(QWidget):
             ("Gravity Y", "grav_y"),
             ("Gravity Z", "grav_z"),
         ]
-        for row, (label, key) in enumerate(imu_fields):
-            name_lbl = QLabel(label)
-            name_lbl.setObjectName("info_label")
-            val_lbl = QLabel("0.0000")
-            val_lbl.setObjectName("val")
-            self.imu_labels[key] = val_lbl
-            imu_layout.addWidget(name_lbl, row, 0)
-            imu_layout.addWidget(val_lbl, row, 1)
+        for prefix, title in [("robot", "Robot IMU"), ("mujoco", "MuJoCo IMU")]:
+            imu_box = QGroupBox(title)
+            imu_layout = QGridLayout(imu_box)
+            imu_layout.setContentsMargins(12, 12, 12, 12)
+            imu_layout.setSpacing(6)
+            for row, (label, key) in enumerate(imu_fields):
+                name_lbl = QLabel(label)
+                name_lbl.setObjectName("info_label")
+                val_lbl = QLabel("0.0000")
+                val_lbl.setObjectName("val")
+                self.imu_labels[f"{prefix}_{key}"] = val_lbl
+                imu_layout.addWidget(name_lbl, row, 0)
+                imu_layout.addWidget(val_lbl, row, 1)
+            imu_h_layout.addWidget(imu_box)
 
-        splitter.addWidget(imu_box)
+        splitter.addWidget(imu_container)
 
         log_box = QGroupBox("Log")
         log_layout = QVBoxLayout(log_box)
@@ -108,19 +119,28 @@ class StatusPanel(QWidget):
     def update_mode(self, mode_str: str) -> None:
         self.mode_label.setText(f"Mode: {mode_str}")
 
-    def update_joints(self, position: list[float], velocity: list[float]) -> None:
+    def update_joints(self, target: list[float], robot_pos: list[float], robot_vel: list[float], mujoco_pos: list[float], mujoco_vel: list[float]) -> None:
         with QSignalBlocker(self.joint_table):
             for i in range(12):
-                self.joint_table.item(i, 1).setText(f"{position[i]:.4f}")
-                self.joint_table.item(i, 2).setText(f"{velocity[i]:.4f}")
+                self.joint_table.item(i, 1).setText(f"{target[i]:.4f}")
+                self.joint_table.item(i, 2).setText(f"{robot_pos[i]:.4f}")
+                self.joint_table.item(i, 3).setText(f"{mujoco_pos[i]:.4f}")
+                self.joint_table.item(i, 4).setText(f"{robot_vel[i]:.4f}")
+                self.joint_table.item(i, 5).setText(f"{mujoco_vel[i]:.4f}")
 
-    def update_imu(self, gyro: list[float], gravity: list[float]) -> None:
-        self.imu_labels["gyro_x"].setText(f"{gyro[0]:.4f}")
-        self.imu_labels["gyro_y"].setText(f"{gyro[1]:.4f}")
-        self.imu_labels["gyro_z"].setText(f"{gyro[2]:.4f}")
-        self.imu_labels["grav_x"].setText(f"{gravity[0]:.4f}")
-        self.imu_labels["grav_y"].setText(f"{gravity[1]:.4f}")
-        self.imu_labels["grav_z"].setText(f"{gravity[2]:.4f}")
+    def update_imu(self, robot_gyro: list[float], robot_gravity: list[float], mujoco_gyro: list[float], mujoco_gravity: list[float]) -> None:
+        self.imu_labels["robot_gyro_x"].setText(f"{robot_gyro[0]:.4f}")
+        self.imu_labels["robot_gyro_y"].setText(f"{robot_gyro[1]:.4f}")
+        self.imu_labels["robot_gyro_z"].setText(f"{robot_gyro[2]:.4f}")
+        self.imu_labels["robot_grav_x"].setText(f"{robot_gravity[0]:.4f}")
+        self.imu_labels["robot_grav_y"].setText(f"{robot_gravity[1]:.4f}")
+        self.imu_labels["robot_grav_z"].setText(f"{robot_gravity[2]:.4f}")
+        self.imu_labels["mujoco_gyro_x"].setText(f"{mujoco_gyro[0]:.4f}")
+        self.imu_labels["mujoco_gyro_y"].setText(f"{mujoco_gyro[1]:.4f}")
+        self.imu_labels["mujoco_gyro_z"].setText(f"{mujoco_gyro[2]:.4f}")
+        self.imu_labels["mujoco_grav_x"].setText(f"{mujoco_gravity[0]:.4f}")
+        self.imu_labels["mujoco_grav_y"].setText(f"{mujoco_gravity[1]:.4f}")
+        self.imu_labels["mujoco_grav_z"].setText(f"{mujoco_gravity[2]:.4f}")
 
     def append_log(self, msg: str) -> None:
         self.log_edit.appendPlainText(msg)
