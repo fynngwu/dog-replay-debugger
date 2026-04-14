@@ -13,16 +13,10 @@ namespace dog {
 using Clock = std::chrono::steady_clock;
 using Ms = std::chrono::milliseconds;
 
-static std::string GetEnginePath(const std::string& env_var, const std::string& fallback) {
-    const char* env = std::getenv(env_var.c_str());
-    if (env && env[0] != '\0') return std::string(env);
-    return fallback;
-}
-
 PolicyRunner::PolicyRunner(DogDriver& driver, const std::string& engine_path)
     : driver_(driver) {
 
-    std::string path = GetEnginePath(engine_path, "policy.engine");
+    std::string path = engine_path.empty() ? "/home/ares/pure_cpp/policy.engine" : engine_path;
     try {
         inference_ = std::make_unique<InferenceEngine>(path, INPUT_DIM, ACTION_DIM);
     } catch (const std::exception& e) {

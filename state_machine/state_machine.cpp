@@ -14,9 +14,7 @@ using Ms = std::chrono::milliseconds;
 
 StateMachine::StateMachine(DogDriver& driver) : driver_(driver) {
 #ifdef HAS_TENSORRT
-    const char* engine_env = std::getenv("DOG_POLICY_ENGINE");
-    std::string engine_path = engine_env ? engine_env : "";
-    policy_runner_ = std::make_unique<PolicyRunner>(driver_, engine_path);
+    policy_runner_ = std::make_unique<PolicyRunner>(driver_, "");
 #endif
 }
 
