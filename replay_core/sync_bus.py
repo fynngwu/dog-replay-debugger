@@ -31,6 +31,7 @@ class SharedStateBus:
         self._mujoco_viewer_running = False
         self._mujoco_apply_hz = 0.0
         self._mujoco_state: Optional[JointState] = None
+        self._mujoco_imu: Optional[np.ndarray] = None
         self._logs: Deque[str] = deque(maxlen=200)
 
     def log(self, message: str) -> None:
@@ -167,6 +168,10 @@ class SharedStateBus:
                 timestamp_sec=float(timestamp_sec),
             )
 
+    def update_mujoco_imu(self, gyro: np.ndarray, gravity: np.ndarray) -> None:
+        with self._lock:
+            self._mujoco_imu = np.concatenate([gyro, gravity]).astype(np.float64)
+
     def snapshot(self) -> RuntimeSnapshot:
         now = time.monotonic()
         with self._lock:
@@ -215,5 +220,6 @@ class SharedStateBus:
                 mujoco_apply_hz=self._mujoco_apply_hz,
                 mujoco_state=None if self._mujoco_state is None else JointState(self._mujoco_state.positions.copy(), self._mujoco_state.velocities.copy(), self._mujoco_state.torques.copy(), self._mujoco_state.timestamp_sec),
                 mujoco_state_age_s=mujoco_state_age,
+                mujoco_imu=None if self._mujoco_imu is None else self._mujoco_imu.copy(),
                 log_lines=list(self._logs),
             )
