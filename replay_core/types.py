@@ -75,8 +75,8 @@ class RuntimeSnapshot:
     mujoco_viewer_running: bool
     mujoco_apply_hz: float
     mujoco_state: Optional[JointState]
-    mujoco_imu: Optional[np.ndarray] = None
     mujoco_state_age_s: Optional[float]
+    mujoco_imu: Optional[np.ndarray] = None
     log_lines: List[str] = field(default_factory=list)
 
     @property
