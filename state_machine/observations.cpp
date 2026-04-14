@@ -101,14 +101,12 @@ std::vector<float> DriverIMUAdapter::GetObs() const {
     auto imu = driver_.GetIMUData();
     std::vector<float> obs;
     obs.reserve(6);
-    // gyro: DogDriver returns body-frame angular velocity in rad/s
-    obs.push_back(imu.angular_velocity[1]);
-    obs.push_back(-imu.angular_velocity[0]);
-    obs.push_back(imu.angular_velocity[2]);
-    // projected gravity: already a unit vector in body frame
-    obs.push_back(-imu.projected_gravity[1]);
-    obs.push_back(imu.projected_gravity[0]);
-    obs.push_back(-imu.projected_gravity[2]);
+    // DogDriver::GetIMUData() already applies the same axis reordering
+    // as IMUComponent::GetObs(), so just pass through directly.
+    for (int i = 0; i < 3; ++i)
+        obs.push_back(imu.angular_velocity[i]);
+    for (int i = 0; i < 3; ++i)
+        obs.push_back(imu.projected_gravity[i]);
     return obs;
 }
 
@@ -195,8 +193,16 @@ std::vector<float> JointComponent::GetObs() const {
     std::vector<float> obs(DogDriver::NUM_JOINTS * 2);
 
     for (int i = 0; i < DogDriver::NUM_JOINTS; ++i) {
-        obs[i] = js.position[i];
-        obs[DogDriver::NUM_JOINTS + i] = js.velocity[i];
+        float pos = js.position[i];
+        float vel = js.velocity[i];
+
+        if (i >= 8 && i <= 11) {
+            obs[i] = pos / DogDriver::KNEE_GEAR_RATIO;
+            obs[DogDriver::NUM_JOINTS + i] = vel / DogDriver::KNEE_GEAR_RATIO;
+        } else {
+            obs[i] = pos;
+            obs[DogDriver::NUM_JOINTS + i] = vel;
+        }
     }
     return obs;
 }
