@@ -7,7 +7,7 @@
 #include <chrono>
 
 static constexpr const char* kCanNames[4] = {"can0", "can1", "can2", "can3"};
-static constexpr const char* kIMUDev = "/dev/ttyUSB0";
+static constexpr const char* kIMUDev = "/dev/ttyCH341USB0";
 
 DogDriver::DogDriver() {
     for (int leg = 0; leg < NUM_LEGS; ++leg) {
