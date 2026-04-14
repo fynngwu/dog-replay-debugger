@@ -69,3 +69,6 @@ class SMClient:
 
     def get_imu(self) -> dict:
         return self._send_recv(protocol.make_get_imu())
+
+    def get_all(self) -> dict:
+        return self._send_recv(protocol.make_get_all())
