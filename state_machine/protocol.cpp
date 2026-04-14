@@ -1,4 +1,5 @@
 #include "protocol.hpp"
+#include "state_machine.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -58,6 +59,7 @@ ParsedCommand ParseCommand(const std::string& line) {
     else if (op == "get_mode")     cmd.type = Command::GetMode;
     else if (op == "get_joints")   cmd.type = Command::GetJoints;
     else if (op == "get_imu")      cmd.type = Command::GetImu;
+    else if (op == "get_all")      cmd.type = Command::GetAll;
     else                           cmd.type = Command::Unknown;
 
     for (size_t i = 1; i < tokens.size(); ++i)
@@ -112,6 +114,28 @@ std::string SerializeIMU(const float* gyro, const float* gravity) {
         oss << gravity[i];
     }
     oss << "]}";
+    return oss.str();
+}
+
+static std::string ModeToString(Mode mode) {
+    switch (mode) {
+        case Mode::INIT:    return "INIT";
+        case Mode::EXECUTE: return "EXECUTE";
+        case Mode::POLICY:  return "POLICY";
+        case Mode::STOP:    return "STOP";
+    }
+    return "UNKNOWN";
+}
+
+std::string SerializeAll(const std::string& mode, const float* position, const float* velocity, int joint_count, const float* gyro, const float* gravity) {
+    std::ostringstream oss;
+    oss << "{\"mode\":\"" << JsonEscape(mode) << "\",\"joints\":[";
+    for (int i = 0; i < joint_count; ++i) {
+        if (i > 0) oss << ",";
+        oss << "{\"position\":" << position[i] << ",\"velocity\":" << velocity[i] << "}";
+    }
+    oss << "],\"imu\":{\"gyro_x\":" << gyro[0] << ",\"gyro_y\":" << gyro[1] << ",\"gyro_z\":" << gyro[2]
+        << ",\"grav_x\":" << gravity[0] << ",\"grav_y\":" << gravity[1] << ",\"grav_z\":" << gravity[2] << "}}";
     return oss.str();
 }
 

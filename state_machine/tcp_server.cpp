@@ -185,8 +185,22 @@ std::string TcpServer::ProcessCommand(const std::string& line) {
             return MakeOkData(SerializeIMU(imu.angular_velocity.data(),
                                              imu.projected_gravity.data()));
         }
+        case Command::GetAll: {
+            auto js = sm_.GetJointStates();
+            auto imu = sm_.GetIMUData();
+            std::string mode_str;
+            switch (sm_.GetCurrentMode()) {
+                case Mode::INIT:    mode_str = "INIT"; break;
+                case Mode::EXECUTE: mode_str = "EXECUTE"; break;
+                case Mode::POLICY:  mode_str = "POLICY"; break;
+                case Mode::STOP:    mode_str = "STOP"; break;
+            }
+            return MakeOkData(SerializeAll(mode_str, js.position.data(), js.velocity.data(),
+                                           StateMachine::NUM_JOINTS, imu.angular_velocity.data(),
+                                           imu.projected_gravity.data()));
+        }
         case Command::Unknown:
-            return MakeErrorReply("unknown command, use request_mode/target/get_mode/get_joints/get_imu");
+            return MakeErrorReply("unknown command, use request_mode/target/get_mode/get_joints/get_imu/get_all");
             break;
     }
     return MakeErrorReply("internal error");
