@@ -1,4 +1,5 @@
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -9,6 +10,7 @@
 #include <thread>
 
 #include "dog_driver.hpp"
+#include "observations.hpp"
 
 static const char* kJointNames[DogDriver::NUM_JOINTS] = {
     "LF_HipA", "LR_HipA", "RF_HipA", "RR_HipA",
@@ -31,6 +33,7 @@ Commands:
   disable             Disable all motors
   online              Check which motors are online
   info                Print driver info (IMU status, motor status)
+  imu_check           Compare DogDriver::GetIMUData() vs DriverIMUAdapter::GetObs()
 )";
 
 static std::atomic<bool> g_running{true};
@@ -243,6 +246,61 @@ static int cmd_info(DogDriver& driver) {
     return 0;
 }
 
+static int cmd_imu_check(DogDriver& driver) {
+    if (!driver.IsIMUConnected()) {
+        printf("WARNING: IMU is not connected.\n");
+        return 1;
+    }
+
+    std::signal(SIGINT, signal_handler);
+    printf("Comparing DogDriver::GetIMUData() vs DriverIMUAdapter::GetObs() at ~10 Hz (Ctrl+C to stop)...\n\n");
+
+    DriverIMUAdapter adapter(driver);
+    int mismatch_count = 0;
+    int count = 0;
+
+    while (g_running) {
+        auto t0 = std::chrono::steady_clock::now();
+
+        auto imu = driver.GetIMUData();
+        auto adapter_obs = adapter.GetObs();
+
+        auto now = std::chrono::system_clock::now();
+        auto time_t = std::chrono::system_clock::to_time_t(now);
+        char ts[32];
+        std::strftime(ts, sizeof(ts), "%H:%M:%S", std::localtime(&time_t));
+
+        printf("[%s]\n", ts);
+        print_imu(imu);
+
+        printf("  adapter_obs    : [%+.4f %+.4f %+.4f] [%+.4f %+.4f %+.4f]\n",
+               adapter_obs[0], adapter_obs[1], adapter_obs[2],
+               adapter_obs[3], adapter_obs[4], adapter_obs[5]);
+
+        bool mismatch = false;
+        for (int i = 0; i < 3; i++) {
+            if (std::fabs(imu.angular_velocity[i] - adapter_obs[i]) > 1e-6f) mismatch = true;
+            if (std::fabs(imu.projected_gravity[i] - adapter_obs[i + 3]) > 1e-6f) mismatch = true;
+        }
+        if (mismatch) {
+            mismatch_count++;
+            printf("  >>> MISMATCH <<<\n");
+        } else {
+            printf("  OK (match)\n");
+        }
+        printf("\n");
+
+        count++;
+        auto elapsed = std::chrono::steady_clock::now() - t0;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        if (ms < 100) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100 - ms));
+        }
+    }
+    printf("Stopped after %d readings, %d mismatches.\n", count, mismatch_count);
+    return mismatch_count > 0 ? 1 : 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         printf("%s", kUsage);
@@ -299,6 +357,9 @@ int main(int argc, char* argv[]) {
     }
     if (cmd == "info") {
         return cmd_info(driver);
+    }
+    if (cmd == "imu_check") {
+        return cmd_imu_check(driver);
     }
 
     printf("Unknown command: %s\n", cmd.c_str());
