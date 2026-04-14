@@ -1,4 +1,5 @@
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -79,7 +80,7 @@ static int cmd_joints(DogDriver& driver, bool stream) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100 - ms));
             }
         }
-        printf("\nStopped after %d readings.\n");
+        printf("\nStopped after %d readings.\n", count);
         return 0;
     }
 
@@ -119,7 +120,7 @@ static int cmd_imu(DogDriver& driver, bool stream) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100 - ms));
             }
         }
-        printf("\nStopped after %d readings.\n");
+        printf("\nStopped after %d readings.\n", count);
         return 0;
     }
 
@@ -229,7 +230,7 @@ int main(int argc, char* argv[]) {
         return cmd_info(driver);
     }
 
-    printf("Unknown command: %s\n", cmd);
+    printf("Unknown command: %s\n", cmd.c_str());
     printf("%s", kUsage);
     return 1;
 }
