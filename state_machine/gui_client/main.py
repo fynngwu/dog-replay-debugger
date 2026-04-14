@@ -275,7 +275,15 @@ class MainWindow(QMainWindow):
         if self._replaying:
             with QSignalBlocker(self.controls.frame_spin):
                 self.controls.frame_spin.setValue(self._current_frame)
-            return  # skip TCP polling during replay — worker thread owns the socket
+            # Still refresh MuJoCo display during replay (skip TCP polling)
+            target = snapshot.current_target.tolist()
+            mujoco_pos = snapshot.mujoco_state.positions.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+            mujoco_vel = snapshot.mujoco_state.velocities.tolist() if snapshot.mujoco_state is not None else [0.0] * 12
+            mujoco_gyro = snapshot.mujoco_imu[:3].tolist() if snapshot.mujoco_imu is not None else [0.0, 0.0, 0.0]
+            mujoco_gravity = snapshot.mujoco_imu[3:].tolist() if snapshot.mujoco_imu is not None else [0.0, 0.0, 0.0]
+            self.status.update_joints(target, [0.0] * 12, [0.0] * 12, mujoco_pos, mujoco_vel)
+            self.status.update_imu([0.0] * 3, [0.0] * 3, mujoco_gyro, mujoco_gravity)
+            return
 
         if not self.client.is_connected:
             return
