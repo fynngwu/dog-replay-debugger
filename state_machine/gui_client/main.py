@@ -29,7 +29,12 @@ from replay_core.types import ReplaySequence
 
 from adapters.mujoco_adapter import MujocoAdapter
 
-MUJOCO_XML_PATH = str(Path(__file__).resolve().parents[2] / "sim_record" / "leggedrobot_flat_fixed.xml")
+DEFAULT_CSV_PATH = str(
+    Path(__file__).resolve().parents[2] / "sim_record" / "output" / "recording.csv"
+)
+MUJOCO_XML_PATH = str(
+    Path(__file__).resolve().parents[2] / "sim_record" / "leggedrobot_flat_fixed.xml"
+)
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +58,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._wire_actions()
+        self.controls.csv_path.setText(DEFAULT_CSV_PATH)
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._refresh)
