@@ -76,4 +76,14 @@ target_link_libraries(dog_client Threads::Threads)
 
 target_compile_options(dog_client PRIVATE -Wall -Wextra)
 
+# --- Test CLI tool (links directly to DogDriver, no TCP) ---
+add_executable(sm_test test/sm_test.cpp)
+target_include_directories(sm_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${DRIVER_DIR}/include
+)
+target_link_libraries(sm_test PRIVATE Threads::Threads dog_driver)
+target_link_directories(sm_test PRIVATE ${CMAKE_BINARY_DIR}/driver)
+target_compile_options(sm_test PRIVATE -Wall -Wextra)
+
 add_subdirectory(${DRIVER_DIR} ${CMAKE_BINARY_DIR}/driver)
