@@ -164,7 +164,6 @@ void StateMachine::ProcessStop() {
 
 void StateMachine::ExecuteThreadFunc() {
     auto last_sent = driver_.GetJointStates().position;
-    auto next = Clock::now() + Ms(EXECUTE_INTERVAL_MS);
 
     while (running_) {
         std::array<float, NUM_JOINTS> target;
@@ -189,8 +188,7 @@ void StateMachine::ExecuteThreadFunc() {
             driver_.SetAllJointPositions(cmd);
             last_sent = cmd;
             if (reached) break;
-            std::this_thread::sleep_until(next);
-            next += Ms(EXECUTE_INTERVAL_MS);
+            std::this_thread::sleep_for(Ms(EXECUTE_INTERVAL_MS));
         }
     }
 
