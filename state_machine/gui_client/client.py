@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import socket
 
+import protocol
+
 
 class SMClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 48001):
@@ -51,17 +53,16 @@ class SMClient:
             return {"ok": False, "msg": str(e)}
 
     def request_mode(self, mode: str) -> dict:
-        return self._send_recv(f"request_mode {mode}")
+        return self._send_recv(protocol.make_request_mode(mode))
 
     def send_target(self, joints: list[float]) -> dict:
-        vals = " ".join(f"{v:.6f}" for v in joints)
-        return self._send_recv(f"target {vals}")
+        return self._send_recv(protocol.make_target(joints))
 
     def get_mode(self) -> dict:
-        return self._send_recv("get_mode")
+        return self._send_recv(protocol.make_get_mode())
 
     def get_joints(self) -> dict:
-        return self._send_recv("get_joints")
+        return self._send_recv(protocol.make_get_joints())
 
     def get_imu(self) -> dict:
-        return self._send_recv("get_imu")
+        return self._send_recv(protocol.make_get_imu())
