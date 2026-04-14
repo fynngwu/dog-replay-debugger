@@ -195,16 +195,8 @@ std::vector<float> JointComponent::GetObs() const {
     std::vector<float> obs(DogDriver::NUM_JOINTS * 2);
 
     for (int i = 0; i < DogDriver::NUM_JOINTS; ++i) {
-        float pos = js.position[i];
-        float vel = js.velocity[i];
-
-        if (i >= 8 && i <= 11) {
-            obs[i] = pos / DogDriver::KNEE_GEAR_RATIO;
-            obs[DogDriver::NUM_JOINTS + i] = vel / DogDriver::KNEE_GEAR_RATIO;
-        } else {
-            obs[i] = pos;
-            obs[DogDriver::NUM_JOINTS + i] = vel;
-        }
+        obs[i] = js.position[i];
+        obs[DogDriver::NUM_JOINTS + i] = js.velocity[i];
     }
     return obs;
 }
