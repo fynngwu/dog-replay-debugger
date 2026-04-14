@@ -156,8 +156,8 @@ class MainWindow(QMainWindow):
         root = self._project_root()
         xml_path = root / 'sim_record' / 'leggedrobot_flat_fixed.xml'
         preferred_csvs = [
+            root / 'recording.csv',
             root / 'sim_record' / 'output' / 'recording.csv',
-            root / 'recording_20260408_230452.csv',
         ]
         csv_path = next((p for p in preferred_csvs if p.exists()), preferred_csvs[-1])
 
