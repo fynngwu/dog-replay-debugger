@@ -27,6 +27,7 @@ set(SM_SOURCES
     main.cpp
     state_machine.cpp
     tcp_server.cpp
+    protocol.cpp
     observations.cpp
     serial.c
     wit_c_sdk.c
