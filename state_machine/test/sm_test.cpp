@@ -315,8 +315,8 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    printf("Initializing DogDriver (this takes a few seconds)...\n");
-    DogDriver driver;
+    printf("Initializing DogDriver (skip IMU, fast mode)...\n");
+    DogDriver driver(true);
     printf("DogDriver ready.\n\n");
 
     if (cmd == "joints") {

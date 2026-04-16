@@ -87,7 +87,8 @@ public:
     // Constructs driver, opens hardware, enables all motors, sets MIT params,
     // enables auto-report, and waits for all motors to come online.
     // Blocks for ~1-5s depending on motor response time.
-    DogDriver();
+    // If skip_imu is true, skips IMU serial scan (saves ~4s when IMU not needed).
+    explicit DogDriver(bool skip_imu = false);
     ~DogDriver();
 
     DogDriver(const DogDriver&) = delete;

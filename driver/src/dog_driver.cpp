@@ -9,7 +9,7 @@
 static constexpr const char* kCanNames[4] = {"can0", "can1", "can2", "can3"};
 static constexpr const char* kIMUDev = "/dev/ttyCH341USB0";
 
-DogDriver::DogDriver() {
+DogDriver::DogDriver(bool skip_imu) {
     for (int leg = 0; leg < NUM_LEGS; ++leg) {
         can_interfaces_[leg] = std::make_shared<CANInterface>(kCanNames[leg]);
     }
@@ -51,25 +51,20 @@ DogDriver::DogDriver() {
         }
     }
 
-    imu_ = std::make_unique<IMUComponent>(kIMUDev);
-    imu_connected_ = true;
-
-    std::cout << "[DogDriver] Waiting for motors online..." << std::endl;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
-        bool all_online = true;
-        for (int i = 0; i < NUM_JOINTS; ++i) {
-            if (!motor_controller_->IsMotorOnline(motor_indices_[i])) {
-                all_online = false;
-                break;
-            }
-        }
-        if (all_online) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (!skip_imu) {
+        imu_ = std::make_unique<IMUComponent>(kIMUDev);
+        imu_connected_ = true;
+    } else {
+        std::cout << "[DogDriver] Skipping IMU init (--fast mode)" << std::endl;
     }
+
     int online_count = 0;
     for (int i = 0; i < NUM_JOINTS; ++i) {
-        if (motor_controller_->IsMotorOnline(motor_indices_[i])) ++online_count;
+        if (motor_controller_->IsMotorOnline(motor_indices_[i])) {
+            ++online_count;
+        } else {
+            std::cout << "[DogDriver] WARNING: motor [" << i << "] offline" << std::endl;
+        }
     }
     std::cout << "[DogDriver] Ready: " << online_count << "/" << NUM_JOINTS
               << " motors online" << std::endl;
@@ -94,7 +89,8 @@ DogDriver::JointState DogDriver::GetJointStates() const {
 }
 
 DogDriver::IMUData DogDriver::GetIMUData() const {
-    IMUData data;
+    IMUData data{};
+    if (!imu_) return data;
     auto obs = imu_->GetObs();
     for (int i = 0; i < 3; ++i) {
         data.angular_velocity[i] = obs[i];
